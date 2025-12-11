@@ -1,0 +1,38 @@
+{
+    debug
+    admin off
+}
+
+:5000 {
+
+    # Global logging for all requests
+    log {
+        output stdout
+        format console
+        level DEBUG
+    }
+
+    # 1. Define a named matcher for all paths that should go to the Go backend
+    @backend {
+        path /api/*
+        path /posts/*
+    }
+
+    # 2. Use the named matcher in a handle block
+    handle @backend {
+        reverse_proxy backend:8081 {
+            transport http {
+                read_buffer 64kb
+                write_buffer 64kb
+                dial_timeout 10s
+            }
+        }
+    }
+
+    # Frontend requests (This remains the default fallback handler)
+    handle {
+        root * /srv
+        try_files {path} {path}/ /index.html
+        file_server
+    }
+}

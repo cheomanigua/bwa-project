@@ -1,0 +1,80 @@
+
+/* ----------------------------- */
+/* Main navigation menu          */
+/* ----------------------------- */
+
+.menu-container {
+  position: relative;
+  z-index: 2; /* ensures menu is above hero */
+  width: 100%;
+  max-width: 1200px;
+  display: flex;
+  justify-content: space-between;
+  padding: 1rem 2rem;
+}
+
+/* Remove bullets and spacing */
+nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column; /* stack on mobile */
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* Menu links style */
+nav ul li a {
+  text-decoration: none; /* no underline */
+  color: #222;
+  font-weight: 500;
+  padding: 0.3rem 0.6rem;
+  transition: color 0.2s, background-color 0.2s;
+}
+
+/* Hover effect */
+nav ul li a:hover {
+  color: #0077cc;
+  background-color: #f0f0f0;
+  border-radius: 4px;
+}
+
+/* Submenus (nested ul) */
+nav ul li ul {
+  list-style: none;
+  margin: 0.3rem 0 0 0;
+  padding: 0;
+}
+
+/* ----------------------------- */
+/* Horizontal layout on tablet+  */
+/* ----------------------------- */
+@media (min-width: 600px) {
+  nav ul {
+    flex-direction: row;       /* horizontal */
+    justify-content: center;   /* center items */
+    gap: 1rem;                 /* space between top-level items */
+  }
+
+  /* Keep nested ul vertical if submenu exists */
+  nav ul li ul {
+    position: absolute;
+    background: white;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+    padding: 0.5rem;
+    display: none; /* hide by default */
+  }
+
+  nav ul li:hover > ul {
+    display: block; /* show on hover */
+  }
+}
+
+.member-menu { display: none; }
+.visitor-menu { display: block; }
+
+/* Optional: smooth transition */
+nav ul li {
+  transition: opacity 0.2s;
+}

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="{{ .Site.Language.Lang }}">
+<head>
+  <meta charset="UTF-8" />
+	<link rel="stylesheet" href="https://unpkg.com/tachyons@4.12.0/css/tachyons.min.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+	{{ $mainCSS := resources.Get "css/main.css" | resources.Minify | resources.Fingerprint }}
+	<link rel="stylesheet" href="{{ $mainCSS.Permalink }}">
+  <link rel="stylesheet" href="{{ "css/header.css" | relURL }}">
+  <link rel="stylesheet" href="{{ "css/main-menu.css" | relURL }}">
+  <link rel="stylesheet" href="{{ "css/post-cards.css" | relURL }}">
+  <link rel="stylesheet" href="{{ "css/post-cards-double.css" | relURL }}">
+  <link rel="stylesheet" href="{{ "css/pricing-cards.css" | relURL }}">
+	<link rel="stylesheet" href="{{ "css/login.css" | relURL }}">
+	<link rel="stylesheet" href="{{ "css/register.css" | relURL }}">
+	<link rel="stylesheet" href="{{ "css/dashboard.css" | relURL }}">
+
+  {{ partial "head.html" . }}
+</head>
+<body>
+  <header>
+    {{ partial "header.html" . }}
+  </header>
+  <main>
+    {{ block "main" . }}
+      {{ .Content }}
+    {{ end }}
+  </main>
+  <footer>
+    {{ partial "footer.html" . }}
+  </footer>
+</body>
+<script type="module">
+  // --- Global Initialization & Imports ---
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+  import { getAuth, connectAuthEmulator, signOut } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+  import { updateNavVisibility } from "/js/auth.js"; // Menu visibility logic
+
+  // Configuration (Must be consistent across all scripts)
+  const firebaseConfig = {
+    apiKey: "AIzaSy...",
+    authDomain: "my-test-project.firebaseapp.com",
+    projectId: "my-test-project",
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  connectAuthEmulator(auth, "http://localhost:9099");
+
+  document.addEventListener("DOMContentLoaded", () => {
+    // 1. Initial Menu Visibility Check (Runs on every page load)
+    updateNavVisibility();
+
+    // 2. Direct Logout Listener (Listens globally for the button click)
+    document.addEventListener("click", async (e) => {
+      if (e.target.id === "logout-button") {
+        e.preventDefault(); // Stop the link navigation
+
+        try {
+          // Clear backend session cookie
+          await fetch("/api/sessionLogout", {
+            method: "POST",
+            credentials: "include",
+          });
+
+          // Clear client-side session using modern SDK
+          await signOut(auth);
+
+          // Redirect to home page
+          window.location.href = "/";
+        } catch (error) {
+          console.error("Logout failed, redirecting anyway:", error);
+          window.location.href = "/";
+        }
+      }
+    });
+  });
+</script>
+</html>
+
+
+<script>
+fetch('/api/session')
+  .then(res => res.json())
+  .then(data => {
+    if(data.loggedIn) {
+      document.querySelectorAll('.visitor-menu').forEach(el => el.style.display = 'none');
+      document.querySelectorAll('.member-menu').forEach(el => el.style.display = 'block');
+    } else {
+      document.querySelectorAll('.visitor-menu').forEach(el => el.style.display = 'block');
+      document.querySelectorAll('.member-menu').forEach(el => el.style.display = 'none');
+    }
+  })
+  .catch(err => console.error(err));
+</script>

@@ -1,0 +1,60 @@
+{{ define "main" }}
+<section class="logout-section">
+  <h1 class="tc mb3">{{ .Title }}</h1>
+
+	<h1>Logging out...</h1>
+<p id="logoutMessage" style="color: orange;">Processing session termination and redirecting to login page.</p>
+</section>
+
+<script type="module">
+    // --- REAL Firebase SDK Imports ---
+    // Import the required functions from the Firebase client SDK
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+    import { getAuth, signOut, connectAuthEmulator } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+
+    // NOTE: Config is for the SDK structure. Must match the one in login.html
+    const firebaseConfig = {
+        apiKey: "AIzaSy...", 
+        authDomain: "my-test-project.firebaseapp.com",
+        projectId: "my-test-project",
+    };
+
+    // Initialize app and auth
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+
+    // CRITICAL: Point the client SDK to the Auth Emulator (Must match login.html)
+    connectAuthEmulator(auth, "http://localhost:9099");
+    
+    document.addEventListener('DOMContentLoaded', async () => {
+        // Load the navigation structure
+        await loadNavbar(); 
+        
+        const messageElement = document.getElementById('logoutMessage');
+        
+        try {
+            messageElement.textContent = "Clearing session with Firebase SDK...";
+            
+            // 1. CLIENT-SIDE SDK: Sign out the user
+            await signOut(auth);
+
+            // 2. Clear local storage token (best practice to ensure no stale token is left)
+            localStorage.removeItem('id_token'); 
+            updateNavVisibility(); // Update nav state to logged-out links
+            
+            console.log('User signed out successfully via Firebase SDK.');
+            messageElement.textContent = "Successfully logged out. Redirecting...";
+
+        } catch (error) {
+            // Handle any potential errors during the signOut process
+            console.error('Logout error:', error);
+            messageElement.textContent = `Logout failed: ${error.message}. Redirecting anyway.`;
+            localStorage.removeItem('id_token'); // Ensure token is removed even on error
+            updateNavVisibility(); 
+        }
+        
+        // 3. Immediately redirect to the Login page
+        setTimeout(() => { window.location.href = 'login.html'; }, 1000); // 1-second delay for minimal feedback
+    });
+</script>
+{{ end }}

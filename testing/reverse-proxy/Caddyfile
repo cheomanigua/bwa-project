@@ -1,0 +1,86 @@
+{
+    debug
+    admin off
+}
+
+:5000 {
+
+    ##########################################################
+    # Logging
+    ##########################################################
+    log {
+        output stdout
+        format console
+        level DEBUG
+    }
+
+    ###########################################################
+    # CORS SUPPORT FOR MODULE IMPORTS FROM GCS EMULATOR
+    ###########################################################
+
+    # Match JS files
+    @js_cors path /js/*
+
+    # Handle preflight OPTIONS requests
+    @preflight {
+        method OPTIONS
+        path /js/*
+    }
+
+    handle @preflight {
+        header Access-Control-Allow-Origin "*"         # or "http://localhost:9000"
+        header Access-Control-Allow-Methods "GET, OPTIONS"
+        header Access-Control-Allow-Headers "*"
+        header Access-Control-Max-Age "3600"
+        respond "" 204
+    }
+
+    # Add CORS headers to actual GET requests for JS files
+    handle @js_cors {
+        header Access-Control-Allow-Origin "*"
+        header Access-Control-Allow-Methods "GET, OPTIONS"
+        header Access-Control-Allow-Headers "*"
+        root * /srv
+        file_server
+    }
+
+    ###########################################################
+    # GCS EMULATOR PROXY - Serves restricted content (posts)
+    #
+    # This must match the base path used in the Go backend's
+    # generateSignedURL function, which we set to /gcs-content.
+    # This ensures the browser stays on origin 'localhost:5000'.
+    ###########################################################
+
+    @gcs_proxy path_regexp gcs_content ^/gcs-content/.*
+    handle @gcs_proxy {
+        # Remove '/gcs-content' from the path before sending to gcs-emulator
+        uri strip_prefix /gcs-content
+        reverse_proxy gcs-emulator:9000
+    }
+
+    ###########################################################
+    # BACKEND (GO SERVER)
+    ###########################################################
+
+    @backend path /api/* /posts/*
+    handle @backend {
+        reverse_proxy backend:8081 {
+            transport http {
+                read_buffer 64kb
+                write_buffer 64kb
+                dial_timeout 10s
+            }
+        }
+    }
+
+    ###########################################################
+    # FRONTEND (FIREBASE HOSTING STATIC FILES)
+    ###########################################################
+
+    handle {
+        root * /srv
+        try_files {path} {path}/ /index.html
+        file_server
+    }
+}

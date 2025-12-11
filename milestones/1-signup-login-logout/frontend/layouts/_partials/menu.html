@@ -1,0 +1,17 @@
+{{- /* layouts/_partials/menu.html */ -}}
+{{- $page := .page }}
+{{- $menuID := .menuID }}
+
+{{- with index site.Menus $menuID }}
+  <nav>
+    <ul>
+      {{- range . }}
+        {{- $role := .Params.role | default "visitor" }}
+        <li class="{{ $role }}-menu">
+					<a href="{{ .URL }}" {{ with .Params.id }}id="{{ . }}"{{ end }}>{{ .Name }}</a>
+        </li>
+      {{- end }}
+    </ul>
+  </nav>
+{{- end }}
+

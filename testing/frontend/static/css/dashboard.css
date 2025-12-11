@@ -1,0 +1,57 @@
+/* ----------------------------- */
+/* User Account Panel            */
+/* ----------------------------- */
+
+.dashboard-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem;
+  gap: 2rem;
+  width: 100%;
+}
+
+.dashboard-card {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  width: 100%;
+  max-width: 600px;
+}
+
+.dashboard-info {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.dashboard-info li {
+  padding: 0.3rem 0;
+  border-bottom: 1px solid #eee;
+}
+
+.dashboard-actions {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  width: 100%;
+  max-width: 600px;
+}
+
+.btn-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+@media screen and (max-width: 640px) {
+  .btn-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+

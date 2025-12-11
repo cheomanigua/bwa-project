@@ -1,0 +1,12 @@
+# 1. Stop and remove the broken/old firebase container
+podman stop firebase
+podman rm -f firebase
+
+# 3. Stop and remove the Go container (just to be safe)
+podman stop go-backend 2>/dev/null || true
+podman rm -f go-backend 2>/dev/null || true
+podman rmi localhost/go-minimal:dev 2>/dev/null || true
+
+# 4. Clean any leftover volumes/networks (optional but recommended)
+podman volume prune -f
+podman network prune -f

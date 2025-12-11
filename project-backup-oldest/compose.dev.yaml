@@ -1,0 +1,71 @@
+version: "3.9"
+
+services:
+  # --- Firebase Emulator Service ---
+  firebase:
+    # Build the image using the new firebase/Containerfile
+    build:
+      context: .
+      dockerfile: firebase/Containerfile
+    container_name: firebase
+    image: localhost/firebase-emulator-x:latest
+    ports:
+      - "4000:4000"  # Emulator UI
+      - "8080:8080"  # Firestore
+      - "9099:9099"  # Auth
+      - "5000:5000"  # Hosting (Frontend static site)
+    volumes:
+      # 1. Persist emulator data
+      - ./.firebase_data:/root/.cache/firebase/emulators
+      # 2. Mount configuration and rules files (read-only)
+      - ${PWD}/firebase/firebase.json:/app/firebase.json:ro
+      - ${PWD}/firebase/firestore.rules:/app/firestore.rules:ro
+      - ${PWD}/firebase/firestore.indexes.json:/app/firestore.indexes.json:ro
+      # 3. Mount the Hugo 'public' folder (Hosting target)
+      # The emulator expects 'public' folder inside the working directory /app
+      - ${PWD}/frontend/public:/app/public:ro
+    command: >
+      emulators:start
+      --project=my-test-project
+      --only=auth,firestore,hosting,ui
+      --import=./firebase_data
+      --export-on-exit
+
+  # --- Go Backend Service (Cloud Run Simulation) ---
+  backend:
+    # Build using the backend/Containerfile
+    build:
+      context: .
+      # Assuming the Containerfile is now in the backend/ directory
+      dockerfile: backend/Containerfile
+    container_name: go-backend
+    image: localhost/go-minimal:dev
+    # Expose the API port
+    ports:
+      - "8081:8081" # Host:8081 maps to Container:8081
+    # Environment variables for the Go application
+    environment:
+      - PORT=8081 # Explicitly set port for Go server
+      - STATIC_ROOT=/public
+      - CONTENT_ROOT=/app/posts
+      # Firebase Emulator Settings for Go Backend
+      # Uses the service name 'firebase' for network communication
+      - FIRESTORE_EMULATOR_HOST=firebase:8080
+      - FIREBASE_AUTH_EMULATOR_HOST=firebase:9099
+
+      # REQUIRED BY FIREBASE ADMIN SDK
+      - PROJECT_ID=my-test-project
+      - GCLOUD_PROJECT=my-test-project
+      - GOOGLE_CLOUD_PROJECT=my-test-project
+
+    volumes:
+      # 1. Mount Hugo's built static files (public) read-only.
+      - ${PWD}/frontend/public:/public:ro
+      # 2. Mount Hugo's content files (posts) read-only for the Go API to serve.
+      - ${PWD}/frontend/content/posts:/app/posts:ro
+      # 3. Mount Go source code for live changes (optional, but helpful)
+      # - ${PWD}/backend:/app:ro
+    # Ensure Firebase is ready before starting the backend
+    depends_on:
+      firebase:
+        condition: service_started

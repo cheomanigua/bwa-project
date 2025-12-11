@@ -1,0 +1,33 @@
+{
+    debug
+    admin off
+}
+
+:5000 {
+
+    # Global logging for all requests
+    log {
+        output stdout
+        format console
+        level DEBUG
+    }
+
+    # API requests
+    handle /api/* {
+        reverse_proxy backend:8081 {
+            transport http {
+                read_buffer 64kb
+                write_buffer 64kb
+                dial_timeout 10s
+            }
+        }
+    }
+
+    # Frontend requests
+    handle {
+        root * /srv
+        try_files {path} {path}/ /index.html
+        file_server
+    }
+}
+

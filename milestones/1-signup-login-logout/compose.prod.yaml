@@ -1,0 +1,19 @@
+version: "3.9"
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Containerfile
+    container_name: go-backend-prod-sim
+    image: localhost/go-minimal:prod
+    ports:
+      - "8080:8080"
+    environment:
+      # In real Cloud Run, GOOGLE_PROJECT_ID is often automatic via Google Application Credentials.
+      # Setting it here for a production-like simulation.
+      - GOOGLE_PROJECT_ID=your-REAL-project-id
+      - STATIC_ROOT=/public
+      - CONTENT_ROOT=/app/posts
+      # No emulators, connects to real Firebase/Firestore
+    # No volumes needed for production, as content is bundled in the image
+    command: /app/go-server

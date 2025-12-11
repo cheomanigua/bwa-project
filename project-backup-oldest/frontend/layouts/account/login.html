@@ -1,0 +1,25 @@
+{{ define "main" }}
+<section class="login-section">
+  <h1 class="tc mb3">{{ .Title }}</h1>
+
+  <form class="login-form" method="POST" action="/api/login">
+    <div class="form-group">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" placeholder="you@example.com" required>
+    </div>
+
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" placeholder="••••••••" required>
+    </div>
+
+    <button type="submit" class="grow bg-blue b white pa3 br2 bn pointer w-100">Login</button>
+  </form>
+	    <!-- CTA for users who haven't registered -->
+    <p class="mt2 register-cta">
+      Don’t have an account? 
+      <a href="/register" class="register-link">Register here</a>
+    </p>
+</section>
+{{ end }}
+

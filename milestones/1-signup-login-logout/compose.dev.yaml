@@ -1,0 +1,89 @@
+version: "3.9"
+
+services:
+  # ----------------------------------------------------------------
+  # 1. Firebase Emulator Service
+  # ----------------------------------------------------------------
+  firebase:
+    build:
+      context: ./firebase
+      dockerfile: Containerfile
+    container_name: firebase
+    image: localhost/firebase-emulator:latest
+    ports:
+      - "4000:4000"  # Emulator UI
+      - "8080:8080"  # Firestore
+      - "9099:9099"  # Auth
+    volumes:
+      - ./.firebase_data:/root/.cache/firebase/emulators
+      - ${PWD}/firebase/firebase.json:/app/firebase.json:ro
+      - ${PWD}/firebase/firestore.rules:/app/firestore.rules:ro
+      - ${PWD}/firebase/firestore.indexes.json:/app/firestore.indexes.json:ro
+      - ${PWD}/frontend/public:/app/public:ro
+    command: >
+      emulators:start
+      --project=my-test-project
+      --only=auth,firestore
+      --import=./firebase_data
+      --export-on-exit
+    networks:
+      - custom_app_network
+
+  # ----------------------------------------------------------------
+  # 2. Go Backend Service
+  # ----------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Containerfile
+    container_name: go-backend
+    image: localhost/go-api:latest
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - STATIC_ROOT=/public
+      - CONTENT_ROOT=/app/posts
+      - FIRESTORE_EMULATOR_HOST=firebase:8080
+      - FIREBASE_AUTH_EMULATOR_HOST=firebase:9099
+      - PROJECT_ID=my-test-project
+      - GCLOUD_PROJECT=my-test-project
+      - GOOGLE_CLOUD_PROJECT=my-test-project
+    volumes:
+      - ${PWD}/frontend/public:/public:ro
+      - ${PWD}/frontend/content/posts:/app/posts:ro
+    depends_on:
+      - firebase
+    networks:
+      - custom_app_network
+    network_aliases:
+      - go-api-service
+    command: ["/app/go-server", "--http=0.0.0.0:8081"]
+
+  # ----------------------------------------------------------------
+  # 3. Caddy Reverse Proxy Service
+  # ----------------------------------------------------------------
+  caddy:
+    build:
+      context: ./reverse-proxy
+      dockerfile: Containerfile
+    container_name: caddy-server
+    image: localhost/caddy-proxy:latest
+    ports:
+      - "5000:5000"
+    volumes:
+      - ${PWD}/reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${PWD}/frontend/public:/srv:ro
+    depends_on:
+      - backend
+      - firebase
+    networks:
+      - custom_app_network
+
+# ------------------------------------------------------------------
+# 4. Network Definition
+# ------------------------------------------------------------------
+networks:
+  custom_app_network:
+    driver: bridge
+

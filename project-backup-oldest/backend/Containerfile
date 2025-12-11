@@ -1,0 +1,45 @@
+# Use the official Go image for a lean base
+# Updated to 1.25 as requested
+FROM golang:1.25-alpine AS builder
+
+# Set necessary environment variables
+ENV GO111MODULE=on \
+    CGO_ENABLED=0 \
+    GOOS=linux \
+    GOARCH=amd64
+
+# Set the working directory for building
+WORKDIR /app
+
+# Copy go.mod and go.sum to cache dependencies
+# These files are expected to be in the 'backend/' directory alongside this Containerfile
+COPY backend/go.mod backend/go.sum .
+
+# Download dependencies
+RUN go mod download
+
+# Copy the rest of the source code
+COPY backend/main.go .
+
+# Build the application with -ldflags="-s -w" to strip debug info and symbols, reducing binary size
+RUN go build -ldflags="-s -w" -o /go-server .
+
+# --- Final image (minimal base for production/Cloud Run) ---
+FROM alpine:latest
+
+RUN apk add --no-cache ca-certificates
+
+# Set the working directory (matching the deployment environment)
+WORKDIR /app
+
+# Cloud Run/Go apps listen on the $PORT environment variable, which defaults to 8081 in the container
+EXPOSE 8081
+
+# Copy the compiled binary from the builder stage
+COPY --from=builder /go-server .
+
+# Create necessary directories that will be used for volume mounts in dev or bundled in prod
+RUN mkdir -p /public /app/posts
+
+# Define the default command to run your app
+CMD ["/app/go-server"]

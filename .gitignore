@@ -1,0 +1,77 @@
+#################################
+# Hugo (generated build output)
+#################################
+
+# Public site (Hugo output)
+**/public/
+
+# Generated resources
+**/resources/_gen/
+
+# Hugo caches and stats
+**/.cache/
+**/hugo_stats.json
+**/.hugo_build.lock
+
+
+#################################
+# Firebase Emulator (local state)
+#################################
+
+# Emulator data directories
+**/.firebase/
+**/.firebase_data/
+
+# Emulator logs
+**/*firebase-debug.log
+**/*firestore-debug.log
+**/*ui-debug.log
+
+# Misc emulator local files
+**/*.local
+
+
+#################################
+# Fake GCS Server (local mock data)
+#################################
+
+**/fake-gcs-data/
+**/fake-gcs-bucket/
+**/fake-gcs.log
+
+
+#################################
+# Podman (local-only generated data)
+#################################
+
+# Only ignored if you have podman data folders inside projects
+**/podman-data/
+**/podman-volume/
+**/.podman/
+
+
+#################################
+# Logs - always ignore everywhere
+#################################
+
+**/*.log
+
+
+#################################
+# Environment / secrets (all directories)
+#################################
+
+**/.env
+**/.env.*
+
+
+#################################
+# Temporary / editor files globally
+#################################
+
+**/*.tmp
+**/*.swp
+**/*.swo
+**/.vscode/
+**/.idea/
+

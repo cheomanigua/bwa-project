@@ -1,0 +1,11 @@
+{
+  "type": "service_account",
+  "private_key_id": "dummy-1765333271",
+  "private_key": "-----BEGIN RSA PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC+9ZwZpTNQdpVe\nbQ3wSr8l6DBFq/go1MaVHJJcPFY3iW3r0JuY2P5B0TozdnDkogOhWzefFYD1QsGt\n784t6dTNgnZCU+41sHAWT+EBT7h2zTavgMXgq1OoQoY2DkQhCFU/AJes5YZqnqlY\n/ObXh2kmCML7bGd1PJFbptuNOUvmlzJlZ776M9u/2aPg4rwnLy0F3uLYuP8RCVea\nUgdsLPHM3xTmD5QsB6MUnjo6lPTdf1S7LcsNUT9M/zuKPr11gEzXRPoXOm8ptvM2\nUcAKwmBsGNs0EtfCkaeOk03y99fqWSZqvmiHe4Av7hw3zsRiWUnNvzHVhwjnzysg\ngBt4YFkBAgMBAAECggEAC8pheYnkObcgsORd5HTRCZelB2A/YdIFcuaBOPW2wxYW\nteU6/jyDsm+nPs802EESpU9bB1UOEdat273/RoF2FLxV7fF9t03uFcqX03tnIdq4\n4iw6y4z4jN6Sp9rIpRt9G/c+5juDyaiDP03aOPuQ5/rJgzmlx6zWMskCLF2ZzKJ0\n7SIKHvD6oJi1X6fL9bsdry5lNjR0H6EzKGIoRha3O1zkKad5tdEZr6Ck+YSduCoZ\n6g8pslLAgop8OQ1h0hhDn1CO6850Ne/2LEgomOoEiXLDecA/gHcyv7azMO2SIq17\n2FFSmAyd/UtG44oSkHVS5vDKH2qIVPFIf8KFiC03+QKBgQDq4XeCfgtjrhto37dR\nIUKRdYdN6tbMqcrehvA4wupSyMXqkBp/HfgKFNy2L1K27zHbHcQVhgJA+SvB5/Ae\nU8ffVPCXBPqDa9t/x97fLiGBKymBvC372LQppCJmmXMTNEHe1BAexo480ae6Uxz5\nOx3gKCsz4/0O5B6lFIzxZKKWPQKBgQDQIScqXGSY/mT/awAbLnjWwrovsxmw1Q0D\ndi5tL8LmwMbresTBt48DJH3hKLv6wf9GbHkQ8lr+Hn6OsuAzjUPJLKhzXtbedoP7\nDiOdk0wp+KLeEeW6j0H5WboDDSxiQYS500cT3D5lwhbsI1Qv5my0YItaM6wXl5hD\n7rhnnvh+FQKBgCqwNa9Cx0EjmJmz5zZYjCexq5iusMFbrqJI9gnq6vmGwenCrP4j\nbTwv1HlMGoVi7bW8MDIVO/2hC6HfTJXGdlIRtvRLlFgkVy1fHxOC59X5CT8p+1WF\naiETUqlBBFgeLEaaVh+xyJInLIvBpUdqxiBCTK/OpOR681LfbEpHFwGlAoGBAKG1\noKChOOhGgGKT2HlGGk2C7vawyX1Di+DsqhXbzitMDUJZGRcKb+uZJtUSuTuUD6vA\nDDDGnTxkpSBqixiC4fAk6pz5Syl+G/2sdq+wCrVxodm5Pi09sZzzwjssuRd+oIlh\nRxB/R1v4+aZvrLGq7zsW6C8lhsit2HivukeIlLohAoGACgMvIJqpZQCMR1JMfnzq\nlQ290IYe6CG4/M6ZL7z8se9lv5+7MNEmylYvkhOkLdGlL2rXH679w859qmshbzNR\nCirWS2TzwgnALoxZhTXI+8b1f+ORn4Lhtg293O/MWXDKR1gR5g+Fy28GTJft6mFK\nlpzPXPme+aJEMjB13prJSqQ=\n-----END RSA PRIVATE KEY-----",
+  "client_email": "localhost",
+  "client_id": "1234567890",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/test-signer%40example.com"
+}

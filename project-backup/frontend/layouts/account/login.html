@@ -1,0 +1,83 @@
+{{ define "main" }}
+<section class="login-section">
+  <h1 class="tc mb3">{{ .Title }}</h1>
+
+  <form class="login-form">
+    <div class="form-group">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" placeholder="you@example.com" required>
+    </div>
+
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" placeholder="••••••••" required>
+    </div>
+
+    <button type="submit" class="grow bg-blue b white pa3 br2 bn pointer w-100">Login</button>
+		<p id="loginMessage" style="color: green;"></p>
+  </form>
+	    <!-- CTA for users who haven't registered -->
+    <p class="mt2 register-cta">
+      Don’t have an account? 
+      <a href="/register" class="register-link">Register here</a>
+    </p>
+</section>
+
+<script type="module">
+    // --- REAL Firebase SDK Imports ---
+    // Using CDN links to load the real Firebase modules (must be accessible by the browser)
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, connectAuthEmulator } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+
+    // NOTE: Config is for the SDK structure.
+    const firebaseConfig = {
+        apiKey: "AIzaSy...",
+        authDomain: "my-test-project.firebaseapp.com",
+        projectId: "my-test-project",
+    };
+
+    // Initialize app and auth
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+
+    // CRITICAL FIX: Point the client SDK to the Auth Emulator running on localhost:9099
+    connectAuthEmulator(auth, "http://localhost:9099");
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        // Load the navigation HTML first and WAIT for it.
+        await loadNavbar();
+        // Update visibility after injection
+        updateNavVisibility();
+    });
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        const messageElement = document.getElementById('loginMessage');
+        messageElement.textContent = "Signing in via Firebase SDK...";
+
+        try {
+            // 1. CLIENT-SIDE SDK: Sign in directly with the Auth Emulator
+            const userCredential = await signInWithEmailAndPassword(auth, email, password);
+            const idToken = await userCredential.user.getIdToken();
+
+            // 2. Store the token for future API calls
+            localStorage.setItem('id_token', idToken); 
+
+            messageElement.textContent = 'Success! Logged in. Redirecting to home...';
+
+            // Reload the navigation bar on the new page
+            setTimeout(() => { window.location.href = 'index.html'; }, 2000);
+
+        } catch (error) {
+            // Error handling now catches failed sign-ins from the emulator
+            messageElement.textContent = `Login failed: ${error.message}`;
+            messageElement.style.color = 'red';
+            console.error(error);
+        }
+    });
+</script>
+{{ end }}
+

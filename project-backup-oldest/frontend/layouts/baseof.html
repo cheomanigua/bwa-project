@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="{{ .Site.Language.Lang }}">
+<head>
+  <meta charset="UTF-8" />
+	<link rel="stylesheet" href="https://unpkg.com/tachyons@4.12.0/css/tachyons.min.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+	{{ $mainCSS := resources.Get "css/main.css" | resources.Minify | resources.Fingerprint }}
+	<link rel="stylesheet" href="{{ $mainCSS.Permalink }}">
+  <link rel="stylesheet" href="{{ "css/header.css" | relURL }}">
+  <link rel="stylesheet" href="{{ "css/main-menu.css" | relURL }}">
+  <link rel="stylesheet" href="{{ "css/post-cards.css" | relURL }}">
+  <link rel="stylesheet" href="{{ "css/post-cards-double.css" | relURL }}">
+  <link rel="stylesheet" href="{{ "css/pricing-cards.css" | relURL }}">
+	<link rel="stylesheet" href="{{ "css/login.css" | relURL }}">
+	<link rel="stylesheet" href="{{ "css/register.css" | relURL }}">
+	<link rel="stylesheet" href="{{ "css/dashboard.css" | relURL }}">
+
+  {{ partial "head.html" . }}
+</head>
+<body>
+  <header>
+    {{ partial "header.html" . }}
+  </header>
+  <main>
+    {{ block "main" . }}
+      {{ .Content }}
+    {{ end }}
+  </main>
+  <footer>
+    {{ partial "footer.html" . }}
+  </footer>
+</body>
+</html>
+
+
+<script>
+fetch('/api/session')
+  .then(res => res.json())
+  .then(data => {
+    if(data.loggedIn) {
+      document.querySelectorAll('.visitor-menu').forEach(el => el.style.display = 'none');
+      document.querySelectorAll('.member-menu').forEach(el => el.style.display = 'block');
+    } else {
+      document.querySelectorAll('.visitor-menu').forEach(el => el.style.display = 'block');
+      document.querySelectorAll('.member-menu').forEach(el => el.style.display = 'none');
+    }
+  })
+  .catch(err => console.error(err));
+</script>

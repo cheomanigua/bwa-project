@@ -1,0 +1,37 @@
+{{ define "main" }}
+<section class="dashboard-section">
+  <h1 class="tc mb3">{{ .Title }}</h1>
+
+  <!-- User Info Panel -->
+  <div class="dashboard-card">
+    <h2 class="f4 b mb2">Account Information</h2>
+    <ul class="dashboard-info">
+      <li><strong>Name:</strong> Jane Doe</li>
+      <li><strong>Email:</strong> jane@example.com</li>
+      <li><strong>Current Plan:</strong> Pro</li>
+      <li><strong>Subscription Created:</strong> Jan 15, 2024</li>
+      <li><strong>Next Renewal:</strong> Jan 15, 2025</li>
+    </ul>
+  </div>
+
+  <!-- Subscription Controls -->
+  <div class="dashboard-actions">
+    <h2 class="f4 b mb2">Manage Subscription</h2>
+    <div class="btn-group">
+      <button class="grow bg-blue white pa3 br2 bn pointer">Change Plan</button>
+      <button class="grow bg-green white pa3 br2 bn pointer">Change Payment</button>
+      <button class="grow bg-light-red white pa3 br2 bn pointer">Cancel Plan</button>
+    </div>
+  </div>
+
+  <!-- Account Controls -->
+  <div class="dashboard-actions">
+    <h2 class="f4 b mb2">Account Settings</h2>
+    <div class="btn-group">
+      <button class="grow bg-dark-red white pa3 br2 bn pointer">Delete Account</button>
+      <button class="grow bg-gray white pa3 br2 bn pointer">Contact Support</button>
+    </div>
+  </div>
+</section>
+{{ end }}
+

@@ -1,0 +1,72 @@
+{{ define "main" }}
+<section class="dashboard-section">
+  <h1 class="tc mb3">{{ .Title }}</h1>
+
+  <!-- User Info Panel -->
+  <div class="dashboard-card">
+    <h2 class="f4 b mb2">Account Information</h2>
+    <ul class="dashboard-info">
+      <li><strong>Name:</strong> <span id="user-name">Jane Doe</span></li>
+      <li><strong>Email:</strong> <span id="user-email">jane@example.com</span></li>
+      <li><strong>Current Plan:</strong> <span id="user-plan">Pro</span></li>
+      <li><strong>Subscription Created:</strong> <span id="user-created">Jan 15, 2024</span></li>
+      <li><strong>Next Renewal:</strong> Jan 15, 2025</li>
+    </ul>
+  </div>
+
+  <!-- Subscription Controls -->
+  <div class="dashboard-actions">
+    <h2 class="f4 b mb2">Manage Subscription</h2>
+    <div class="btn-group">
+      <button class="grow bg-blue white pa3 br2 bn pointer">Change Plan</button>
+      <button class="grow bg-green white pa3 br2 bn pointer">Change Payment</button>
+      <button class="grow bg-light-red white pa3 br2 bn pointer">Cancel Plan</button>
+    </div>
+  </div>
+
+  <!-- Account Controls -->
+  <div class="dashboard-actions">
+    <h2 class="f4 b mb2">Account Settings</h2>
+    <div class="btn-group">
+      <button class="grow bg-dark-red white pa3 br2 bn pointer">Delete Account</button>
+      <button class="grow bg-gray white pa3 br2 bn pointer">Contact Support</button>
+    </div>
+  </div>
+</section>
+
+<script>
+document.addEventListener("DOMContentLoaded", async () => {
+    try {
+        // 1. Fetch the user session data from the backend
+        const response = await fetch("/api/session");
+        const userData = await response.json();
+
+        if (userData.loggedIn) {
+            // 2. Update the DOM elements with actual user data
+            document.getElementById("user-name").textContent = userData.name || "N/A";
+            document.getElementById("user-email").textContent = userData.email || "N/A";
+            
+            // Capitalize the plan (e.g., 'basic' -> 'Basic')
+            const planText = userData.plan ? capitalize(userData.plan) : "N/A";
+            document.getElementById("user-plan").textContent = planText;
+            
+            document.getElementById("user-created").textContent = userData.registeredAt || "N/A";
+            
+            // NOTE: The 'Next Renewal' field is still static, you may need a separate mechanism for this.
+
+        } else {
+            // If the user is not logged in, redirect to login
+            window.location.href = "/login";
+        }
+    } catch (error) {
+        console.error("Failed to fetch user data:", error);
+    }
+});
+
+function capitalize(s) {
+    if (typeof s !== 'string') return ''
+    return s.charAt(0).toUpperCase() + s.slice(1)
+}
+</script>
+{{ end }}
+

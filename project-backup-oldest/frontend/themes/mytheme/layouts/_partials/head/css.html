@@ -1,0 +1,11 @@
+<!-- The commented line below is used to load assets/css/main.css -->
+<!-- I changed it to load main.css from layout/baseof.html instead of here -->
+<!-- {{- with resources.Get "css/main.css" }} -->
+  {{- if hugo.IsDevelopment }}
+    <link rel="stylesheet" href="{{ .RelPermalink }}">
+  {{- else }}
+    {{- with . | minify | fingerprint }}
+      <link rel="stylesheet" href="{{ .RelPermalink }}" integrity="{{ .Data.Integrity }}" crossorigin="anonymous">
+    {{- end }}
+  {{- end }}
+	<!-- {{- end }} -->

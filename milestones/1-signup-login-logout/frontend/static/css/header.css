@@ -1,0 +1,103 @@
+
+/* ----------------------------- */
+/* Hero Header                   */
+/* ----------------------------- */
+.site-header {
+  position: relative;
+  width: 100%;
+  height: 400px; /* adjust height of hero */
+  background-image: url('https://images.unsplash.com/photo-1542281286-9e0a16bb7366?auto=format&fit=crop&w=1950&q=80');
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: flex-start; /* menu at the top */
+  justify-content: center;
+  color: white;
+  box-shadow: inset 0 0 0 1000px rgba(0,0,0,0.2); /* optional dark overlay for readability */
+}
+
+.hero {
+  position: relative;
+  width: 100%;
+  height: 300px; /* adjust height */
+  overflow: hidden;
+	border: 2px solid red;
+}
+
+.hero-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* cover the container nicely */
+}
+
+.hero-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start; /* menu stays on top */
+  align-items: center;
+  padding: 1rem;
+  background: rgba(0,0,0,0.3); /* optional dark overlay for contrast */
+  box-sizing: border-box;
+}
+
+/* Site title on top of hero */
+.site-title {
+  color: white;
+  margin: 0;
+  font-size: 2rem;
+  z-index: 2;
+}
+
+/* Menu links on top of hero */
+.hero-overlay nav ul {
+  flex-direction: row;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.hero-overlay nav ul li a {
+  color: white;
+  text-decoration: none;
+  font-weight: 500;
+  padding: 0.4rem 0.8rem;
+  background: rgba(0,0,0,0.5);
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.hero-overlay nav ul li a:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .hero-overlay nav ul {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+}
+
+.site-header h1 {
+  margin: 0;
+  color: white;
+}
+
+.site-header nav ul {
+  display: flex;
+  gap: 2rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.site-header nav ul li a {
+  text-decoration: none;
+  color: white;
+  font-weight: bold;
+}

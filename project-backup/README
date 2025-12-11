@@ -1,0 +1,42 @@
+Before running main.go, you must do two things:
+
+- Generate the public directory in frontend/
+
+1. cd frontend/
+2. hugo
+
+- create a symbolic link to the public/ directory located in frontend/
+
+1. cd backend
+2. ln -s ../frontend/public public
+
+If you want to copy the project to a pendrive or create a clean backup, you can safely remove:
+
+- frontend/public/
+- frontend/resources/_gen/
+- .firebase_data/
+
+Container usage:
+
+There are two compose files and one Containerfile file:
+- compose.dev.yaml is used for development.
+- compose.prod.yaml is used for production.
+- Containerfile creates the image that can be used both in dev and prod.
+
+# Run dev container
+podman-compose -f compose.dev.yaml up -d
+
+# Run prod container
+podman-compose -f compose.prod.yaml up -d
+
+# Stop and remove everything
+podman-compose -f compose.dev.yaml down
+podman-compose -f compose.prod.yaml down
+podman volume prune -f
+
+# Remove old volumes
+podman volume rm $(podman volume ls -q) 2>/dev/null || true
+podman rmi localhost/go-minimal:latest
+podman rmi $(podman images -f "dangling=true" -q)
+
+
