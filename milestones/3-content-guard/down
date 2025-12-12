@@ -1,0 +1,4 @@
+podman-compose -f compose.dev.yaml down -v
+rm -r frontend/public/*
+rm -r .firebase_data
+podman volume prune -f

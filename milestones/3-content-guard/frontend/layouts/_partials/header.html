@@ -1,0 +1,7 @@
+<header class="site-header">
+  <div class="menu-container">
+    <h1>{{ site.Title }}</h1>
+    {{ partial "menu.html" (dict "menuID" "main" "page" . "site" site) }}
+  </div>
+</header>
+

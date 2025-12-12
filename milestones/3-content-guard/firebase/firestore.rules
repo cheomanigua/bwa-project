@@ -1,0 +1,24 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Only authenticated users can access the 'users' collection
+    match /users/{userId} {
+      // Users can only read their own data (based on their email being the document ID)
+      allow read: if request.auth.uid != null && request.auth.token.email == userId;
+
+      // Registration (create) is handled by the Go backend, which uses the Admin SDK,
+      // which bypasses these rules. However, if you had client-side registration,
+      // you'd typically allow writes here.
+      // Since your Go app uses the Admin SDK, we can lock this down a bit more:
+      allow create: if false; 
+      allow update, delete: if request.auth.uid != null && request.auth.token.email == userId;
+    }
+
+    // Allow your Go backend (which uses Admin SDK) to manage sessions,
+    // but no one else. Since the Go app uses the Admin SDK, it bypasses rules anyway.
+    // However, if you add a temporary Auth emulator, you might restrict client access.
+    match /sessions/{sessionId} {
+      allow read, write: if false; 
+    }
+  }
+}
