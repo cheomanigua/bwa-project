@@ -142,8 +142,8 @@ func generateSignedURL(objectName string) (string, error) {
 	}
 
 	// EMULATOR MODE: fake-gcs-server IGNORES signature → just build URL manually
-	base := "http://localhost:9000"
-	path := fmt.Sprintf("/%s/%s", GCSBucket, objectName)
+	base := "http://localhost:5000"
+	path := fmt.Sprintf("/gcs-content/%s/%s", GCSBucket, objectName)
 	expires := time.Now().Add(15 * time.Minute).Unix()
 
 	url := fmt.Sprintf("%s%s?X-Goog-Algorithm=GOOG4-RSA-SHA256"+

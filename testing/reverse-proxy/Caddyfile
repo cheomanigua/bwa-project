@@ -1,5 +1,4 @@
 {
-    debug
     admin off
 }
 
@@ -11,7 +10,7 @@
     log {
         output stdout
         format console
-        level DEBUG
+        level INFO
     }
 
     ###########################################################
@@ -56,7 +55,13 @@
     handle @gcs_proxy {
         # Remove '/gcs-content' from the path before sending to gcs-emulator
         uri strip_prefix /gcs-content
-        reverse_proxy gcs-emulator:9000
+
+        # Proxy to the GCS emulator
+        reverse_proxy gcs-emulator:9000 {
+          # Add the host header to match the GCS emulator's expectation
+          header_up Host localhost:9000
+        }
+
     }
 
     ###########################################################
