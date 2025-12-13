@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -134,7 +135,7 @@ func generateSignedURL(objectName string) (string, error) {
 		// Production path — keep your real signing logic
 		opts := &storage.SignedURLOptions{
 			Method:         "GET",
-			Expires:        time.Now().Add(15 * time.Minute),
+			Expires:        time.Now().Add(30 * time.Second),
 			Scheme:         storage.SigningSchemeV4,
 			GoogleAccessID: GCSAccessID,
 		}
@@ -142,9 +143,9 @@ func generateSignedURL(objectName string) (string, error) {
 	}
 
 	// EMULATOR MODE: fake-gcs-server IGNORES signature → just build URL manually
-	base := "http://localhost:5000"
+	base := "http://caddy-server:5000"
 	path := fmt.Sprintf("/gcs-content/%s/%s", GCSBucket, objectName)
-	expires := time.Now().Add(15 * time.Minute).Unix()
+	expires := time.Now().Add(5 * time.Second).Unix()
 
 	url := fmt.Sprintf("%s%s?X-Goog-Algorithm=GOOG4-RSA-SHA256"+
 		"&X-Goog-Credential=%s%%2F%s%%2Fauto%%2Fstorage%%2Fgoog4_request"+
@@ -163,6 +164,7 @@ func generateSignedURL(objectName string) (string, error) {
 }
 
 // --- Handlers ---
+
 func contentGuardHandler(w http.ResponseWriter, r *http.Request) {
 	user := getAuthenticatedUserFromCookie(r)
 	userPlan := "visitor"
@@ -170,9 +172,12 @@ func contentGuardHandler(w http.ResponseWriter, r *http.Request) {
 		userPlan = user.Plan
 	}
 
-	requestPath := strings.TrimSuffix(r.URL.Path, "/")
+	requestPath := r.URL.Path
+	requestPath = strings.TrimSuffix(requestPath, "/")
 	requestPath = strings.TrimSuffix(requestPath, "/index.html")
+	requestPath = strings.TrimSuffix(requestPath, "/index")
 
+	// 1. Authorization Check
 	if !contentGuard.IsAuthorized(requestPath, userPlan) {
 		w.WriteHeader(http.StatusForbidden)
 		w.Header().Set("Content-Type", "text/html")
@@ -185,12 +190,14 @@ func contentGuardHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// CORRECT: object name without bucket prefix
-	objectPath := strings.TrimPrefix(requestPath, "/")   // "posts/week0001"
-	objectPath = filepath.Join(objectPath, "index.html") // "posts/week0001/index.html"
+	// 2. Object Path Construction
+
+	objectPath := strings.TrimPrefix(requestPath, "/")
+	objectPath = filepath.Join(objectPath, "index.html")
 
 	log.Printf("User authorized. Generating Signed URL for object: %s", objectPath)
 
+	// 3. Generate Signed URL (Short-lived, server-side only)
 	signedURL, err := generateSignedURL(objectPath)
 	if err != nil {
 		log.Printf("Failed to generate signed URL: %v", err)
@@ -198,7 +205,48 @@ func contentGuardHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, signedURL, http.StatusFound)
+	// 4. PROXY THE CONTENT from GCS
+
+	// Create a new HTTP request to the GCS signed URL
+	resp, err := http.Get(signedURL)
+	if err != nil {
+		log.Printf("Failed to fetch content from GCS: %v", err)
+		http.Error(w, "Content fetch error", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Handle GCS errors (e.g., object not found, or internal GCS error)
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("GCS responded with status: %d for object: %s", resp.StatusCode, objectPath)
+		// Propagate the error status back to the client
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+		return
+	}
+
+	// 5. Set Response Headers
+
+	// Copy original Content-Type from GCS
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+
+	// CRITICAL: Set Cache-Control to prevent the client from caching the response.
+	// This ensures that on refresh, the client *must* hit the server again,
+	// which means the authorization logic runs again.
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+
+	// 6. Copy the Content to the Client
+
+	w.WriteHeader(http.StatusOK)
+	_, err = io.Copy(w, resp.Body)
+	if err != nil {
+		// Note: Error here means write failure after headers were sent (client disconnect)
+		log.Printf("Error copying content to client: %v", err)
+	}
 }
 
 // --- API Endpoints ---
@@ -419,7 +467,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	http.HandleFunc("/", contentGuardHandler)
+	http.HandleFunc("/posts/", contentGuardHandler)
 	http.HandleFunc("/api/register", handleRegister)
 	http.HandleFunc("/api/sessionLogin", handleSessionLogin)
 	http.HandleFunc("/api/sessionLogout", handleSessionLogout)
