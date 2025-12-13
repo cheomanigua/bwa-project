@@ -68,7 +68,7 @@
     # BACKEND (GO SERVER)
     ###########################################################
 
-    @backend path /api/* /posts/*
+    @backend path /api/* /posts/*/*
     handle @backend {
         reverse_proxy backend:8081 {
             transport http {

@@ -163,9 +163,9 @@ func generateSignedURL(objectName string) (string, error) {
 	return url, nil
 }
 
-// --- Handlers ---
+// --- HTTP Handlers ---
 
-func contentGuardHandler(w http.ResponseWriter, r *http.Request) {
+func handleContentGuard(w http.ResponseWriter, r *http.Request) {
 	user := getAuthenticatedUserFromCookie(r)
 	userPlan := "visitor"
 	if user != nil {
@@ -249,7 +249,7 @@ func contentGuardHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// --- API Endpoints ---
+// --- API Handlers ---
 // handleRegister handles the second stage of registration: verifying the user and
 // storing their profile in Firestore.
 func handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -467,7 +467,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	http.HandleFunc("/posts/", contentGuardHandler)
+	http.HandleFunc("/posts/", handleContentGuard)
 	http.HandleFunc("/api/register", handleRegister)
 	http.HandleFunc("/api/sessionLogin", handleSessionLogin)
 	http.HandleFunc("/api/sessionLogout", handleSessionLogout)
