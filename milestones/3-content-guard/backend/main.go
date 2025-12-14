@@ -145,7 +145,7 @@ func generateSignedURL(objectName string) (string, error) {
 	// EMULATOR MODE: fake-gcs-server IGNORES signature → just build URL manually
 	base := "http://caddy-server:5000"
 	path := fmt.Sprintf("/gcs-content/%s/%s", GCSBucket, objectName)
-	expires := time.Now().Add(5 * time.Second).Unix()
+	fakeExpireLocalLinux := time.Now().Add(5 * time.Second).Unix()
 
 	url := fmt.Sprintf("%s%s?X-Goog-Algorithm=GOOG4-RSA-SHA256"+
 		"&X-Goog-Credential=%s%%2F%s%%2Fauto%%2Fstorage%%2Fgoog4_request"+
@@ -156,14 +156,14 @@ func generateSignedURL(objectName string) (string, error) {
 		GCSAccessID,
 		time.Now().Format("20060102"),
 		time.Now().Format("20060102T150405Z"),
-		int(expires-time.Now().Unix()),
+		int(fakeExpireLocalLinux-time.Now().Unix()),
 	)
 
 	log.Printf("Emulator mode: fake signed URL generated: %s", url)
 	return url, nil
 }
 
-// --- Handlers ---
+// --- HTTP Handlers ---
 
 func handleContentGuard(w http.ResponseWriter, r *http.Request) {
 	user := getAuthenticatedUserFromCookie(r)
@@ -249,7 +249,7 @@ func handleContentGuard(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// --- API Endpoints ---
+// --- API Handlers ---
 // handleRegister handles the second stage of registration: verifying the user and
 // storing their profile in Firestore.
 func handleRegister(w http.ResponseWriter, r *http.Request) {
