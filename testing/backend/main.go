@@ -325,6 +325,11 @@ func handleCreateCheckoutSession(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 
+		Expand: []*string{
+			stripe.String("payment_intent"),
+			stripe.String("setup_intent"),
+		},
+
 		// *** FIX: REMOVED CustomerCreation PARAMETER ***
 		// It is invalid in 'subscription' mode. Stripe handles customer creation automatically.
 
@@ -350,18 +355,19 @@ func handleCreateCheckoutSession(w http.ResponseWriter, r *http.Request) {
 // handleRegister is removed. It is replaced by handleStripeWebhook.
 // handleStripeWebhook securely creates the Firebase user and Firestore profile after successful payment.
 // It also sets the successful payment method as the default for the customer in Stripe.
+// handleStripeWebhook processes events from Stripe, primarily checkout.session.completed,
+// to create the Firebase user, set the Firestore plan, and save the default payment method.
 func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	// 1. Verify and Read Webhook Payload
 	const MaxBodyBytes = int64(65536)
 	payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
 	if err != nil {
+		log.Printf("Error reading request body: %v", err)
 		http.Error(w, "Error reading request body", http.StatusServiceUnavailable)
 		return
 	}
 
 	signature := r.Header.Get("Stripe-Signature")
-
-	// Options to ignore API version mismatch for local Stripe CLI testing
 	options := webhook.ConstructEventOptions{
 		IgnoreAPIVersionMismatch: true,
 	}
@@ -384,13 +390,13 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		var checkoutSession stripe.CheckoutSession
 		if err := json.Unmarshal(event.Data.Raw, &checkoutSession); err != nil {
 			log.Printf("Error unmarshalling session: %v", err)
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusOK) // Acknowledge to prevent retries
 			return
 		}
 
-		// *** FIX: Robust Nil Checks to Prevent Runtime Panic ***
+		// Robust Nil Checks
 		if checkoutSession.Customer == nil || checkoutSession.Subscription == nil || checkoutSession.CustomerDetails == nil || checkoutSession.CustomerDetails.Email == "" {
-			log.Printf("FATAL: Received checkout.session.completed event missing critical data (Customer, Subscription, or Email). Object: %s", checkoutSession.ID)
+			log.Printf("FATAL: Received checkout.session.completed event missing critical data.")
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -398,74 +404,72 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		stripeCustomerID := checkoutSession.Customer.ID
 		subID := checkoutSession.Subscription.ID
 
-		paymentIntentID := ""
+		// Safely extract Intent IDs (rely on Step 1 fix: expanding them in Checkout Session)
+		var paymentIntentID string
 		if checkoutSession.PaymentIntent != nil {
 			paymentIntentID = checkoutSession.PaymentIntent.ID
 		}
-		setupIntentID := ""
+		var setupIntentID string
 		if checkoutSession.SetupIntent != nil {
 			setupIntentID = checkoutSession.SetupIntent.ID
 		}
 
 		ctx := r.Context()
 
-		// A. Get Plan Details (Uses subscription package)
-		params := &stripe.SubscriptionParams{}
-		// *** FIX: Expand Price's Product to get the name if Nickname is missing ***
-		params.AddExpand("items.data.price.product")
+		// A. Get Plan Details with Expansion for Product Name
+		subParams := &stripe.SubscriptionParams{}
+		subParams.AddExpand("items.data.price.product")
 
-		sub, err := subscription.Get(subID, params)
+		sub, err := subscription.Get(subID, subParams)
 		if err != nil {
 			log.Printf("Error fetching subscription %s: %v", subID, err)
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 
-		// Defensive check for nested plan details
-		if len(sub.Items.Data) == 0 || sub.Items.Data[0].Price == nil {
-			log.Printf("FATAL: Subscription %s missing price data.", subID)
-			w.WriteHeader(http.StatusOK)
-			return
-		}
+		price := sub.Items.Data[0].Price
 
-		price := sub.Items.Data[0].Price // Get the price object
-
-		// Try to get the plan nickname first, then fallback to product name
+		// Get plan name (Nickname -> Product Name -> Price ID)
 		regPlan := price.Nickname
 		if regPlan == "" && price.Product != nil {
 			regPlan = price.Product.Name
 		}
-
-		// Final fallback to Price ID if all else fails
 		if regPlan == "" {
 			regPlan = price.ID
 			log.Printf("WARNING: Using Price ID %s as plan name.", regPlan)
 		}
 
-		// Convert the plan name to lowercase and remove " Membership" for consistent
-		// matching with the Content Guard's expectations (e.g., "elite" instead of "Elite Membership").
+		// Plan Normalization for Content Guard (e.g., "Elite Membership" -> "elite")
 		regPlan = strings.ToLower(regPlan)
 		regPlan = strings.TrimSuffix(regPlan, " membership")
-		regPlan = strings.TrimSpace(regPlan) // Final cleanup
-		// *** END FIX ***
+		regPlan = strings.TrimSpace(regPlan)
 
 		regEmail := checkoutSession.CustomerDetails.Email
 		regName := checkoutSession.CustomerDetails.Name
 
 		log.Printf("Checkout session completed for Email: %s, Plan: %s, Customer ID: %s", regEmail, regPlan, stripeCustomerID)
 
-		// B. Set Default Payment Method (Uses paymentintent package)
+		// B. Set Default Payment Method
 		pmID := ""
+
+		// 1. Try to get PM ID from Payment Intent
 		if paymentIntentID != "" {
 			pi, err := paymentintent.Get(paymentIntentID, nil)
 			if err == nil && pi.PaymentMethod != nil {
 				pmID = pi.PaymentMethod.ID
 			}
+			// 2. Try to get PM ID from Setup Intent
 		} else if setupIntentID != "" {
 			si, err := setupintent.Get(setupIntentID, nil)
 			if err == nil && si.PaymentMethod != nil {
 				pmID = si.PaymentMethod.ID
 			}
+		}
+
+		// 3. Fallback: Get PM ID directly from Subscription object
+		if pmID == "" && sub.DefaultPaymentMethod != nil {
+			pmID = sub.DefaultPaymentMethod.ID
+			log.Printf("Fallback: Retrieved PM ID %s directly from Subscription object.", pmID)
 		}
 
 		if pmID != "" {
@@ -486,16 +490,16 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// C. Create the Firebase User & Firestore Profile
-
 		userRecord, err := authClient.GetUserByEmail(ctx, regEmail)
 		var firebaseUID string
 		var isNewUser bool = false
+		// userRecord and isNewUser are used below, fixing the compiler warning.
 
 		if err != nil {
 			// User does not exist, create them
-			tempPass, err := generateTempPassword()
-			if err != nil {
-				log.Printf("Failed to generate temp password: %v", err)
+			tempPass, passErr := generateTempPassword()
+			if passErr != nil {
+				log.Printf("Failed to generate temp password: %v", passErr)
 				w.WriteHeader(http.StatusOK)
 				return
 			}
@@ -524,7 +528,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 
 		// D. Create/Update FINAL, PERMANENT Firestore profile
 		finalProfile := map[string]any{
-			"plan":         regPlan, // This will now be the correct plan name
+			"plan":         regPlan, // The normalized plan name (e.g., "elite")
 			"stripeID":     stripeCustomerID,
 			"name":         regName,
 			"email":        regEmail,
@@ -538,12 +542,12 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 
 		// E. Generate and Send Password Setup Link (Only for newly created users)
 		if isNewUser {
-			resetLink, err := authClient.PasswordResetLink(ctx, regEmail)
-			if err != nil {
-				log.Printf("Failed to generate password reset link: %v", err)
+			resetLink, linkErr := authClient.PasswordResetLink(ctx, regEmail)
+			if linkErr != nil {
+				log.Printf("Failed to generate password reset link: %v", linkErr)
 			} else {
-				if err := sendPasswordSetupEmail(regEmail, resetLink); err != nil {
-					log.Printf("Failed to send setup email: %v", err)
+				if emailErr := sendPasswordSetupEmail(regEmail, resetLink); emailErr != nil {
+					log.Printf("Failed to send setup email: %v", emailErr)
 				}
 			}
 		}
