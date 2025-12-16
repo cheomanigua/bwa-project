@@ -52,6 +52,8 @@ services:
       - GCS_EMULATOR_HOST=gcs-emulator:9000
       - GCS_BUCKET=content
       - GCS_ACCESS_ID=localhost
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
     volumes:
       - ${PWD}/frontend/public:/public:ro
       - ${PWD}/frontend/content/posts:/app/posts:ro

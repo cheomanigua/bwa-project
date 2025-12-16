@@ -29,8 +29,66 @@
   <footer>
     {{ partial "footer.html" . }}
   </footer>
-</body>
-<script type="module">
+
+    <script src="https://js.stripe.com/v3/"></script>
+
+    <script>
+        // 2. Define the global constant and function in a single block SECOND
+        
+        // **IMPORTANT**: Replace 'pk_test_XXXXXXXXXXXXXXXXXXXXXXXX' with your actual Stripe Publishable Key
+				const stripeKey = '{{ .Site.Params.stripePublishableKey }}';
+        const stripe = Stripe(stripeKey);
+
+        // Define the function globally
+        async function startCheckout(event, priceId) {
+            event.preventDefault(); 
+
+            // Visually indicate processing
+            const button = event.target;
+            const originalText = button.innerHTML;
+            button.innerHTML = 'Processing...';
+            button.disabled = true;
+
+            try {
+                // 1. Call the Go Backend to create a Stripe Checkout Session
+                const response = await fetch('{{ "/api/create-checkout-session" | absURL }}', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ priceId: priceId }),
+                });
+
+                if (!response.ok) {
+                    // Log the error response body if available
+                    const errorText = await response.text();
+                    console.error("Backend Error Response:", errorText);
+                    // Throw a specific error if the backend returned a non-200 status
+                    throw new Error(`Failed to create Stripe session. Status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                const sessionId = data.sessionId;
+
+                // 2. Redirect the user to the Stripe-hosted checkout page
+                const result = await stripe.redirectToCheckout({
+                    sessionId: sessionId
+                });
+
+                if (result.error) {
+                    alert(result.error.message);
+                }
+
+            } catch (error) {
+                console.error("Checkout process failed:", error);
+                alert("Payment initiation failed. Please check your console for details.");
+            } finally {
+                // Restore button state if the redirect fails or an error occurs
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+    </script>
+    
+    <script type="module">
   // --- Global Initialization & Imports ---
   import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
   import { getAuth, connectAuthEmulator, signOut } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
@@ -76,7 +134,6 @@
     });
   });
 </script>
-</html>
 
 
 <script>
@@ -93,3 +150,6 @@ fetch('{{ "/api/session" | absURL }}')
   })
   .catch(err => console.error(err));
 </script>
+
+</body>
+</html>

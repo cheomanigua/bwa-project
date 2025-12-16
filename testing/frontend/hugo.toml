@@ -3,6 +3,13 @@ languageCode = 'en-us'
 title = 'My New Hugo Site'
 theme = 'mytheme'
 
+[params]
+  stripePublishableKey = "pk_test_51MqjBWASlOB9XtLrplfhbiVuNqhQ5HqWc89hEKvIVRXfAFIfkfBv4EWHKlndi5dtTwPJSTvjMf0J71hSjLPCRdUb00hrD6bWeq"
+	[params.stripePlans]
+    basic = "price_1SeJiGASlOB9XtLr4Eh1sFKQ"
+    pro = "price_1SeJhZASlOB9XtLrwhqZJIOz"
+    elite = "price_1SeJYfASlOB9XtLrAATjV41F"
+
 [menus]
   # === Visitor Menu ===
   [[menus.main]]

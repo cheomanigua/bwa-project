@@ -6,6 +6,7 @@ require (
 	cloud.google.com/go/firestore v1.20.0
 	cloud.google.com/go/storage v1.56.0
 	firebase.google.com/go/v4 v4.18.0
+	github.com/stripe/stripe-go/v84 v84.0.0
 	google.golang.org/api v0.257.0
 )
 
