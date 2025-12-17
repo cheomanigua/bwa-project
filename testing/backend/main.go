@@ -22,7 +22,12 @@ import (
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/auth"
 	"github.com/stripe/stripe-go/v84"
-	"github.com/stripe/stripe-go/v84/checkout/session"
+
+	// Use alias for Checkout Session to avoid conflict (FIXED)
+	checkoutsession "github.com/stripe/stripe-go/v84/checkout/session"
+	// Use alias for Billing Portal Session to avoid conflict (FIXED)
+	portalsession "github.com/stripe/stripe-go/v84/billingportal/session"
+
 	"github.com/stripe/stripe-go/v84/customer"
 	"github.com/stripe/stripe-go/v84/paymentintent"
 	"github.com/stripe/stripe-go/v84/price"
@@ -45,8 +50,6 @@ var (
 
 // --- Domain Models ---
 
-// NOTE: UserRegistration is now obsolete but kept for reference on existing handlers
-
 type UserRegistration struct {
 	IDToken string `json:"idToken"`
 	Name    string `json:"name"`
@@ -60,11 +63,11 @@ type AuthUser struct {
 	Plan         string
 	Name         string
 	RegisteredAt time.Time
+	NextRenewal  time.Time
+	StripeID     string // Used for the Stripe Customer Portal
 }
 
 // --- Content Guard ---
-// (ContentGuard struct and related functions like Init, IsAuthorized, and regexes remain unchanged)
-
 type ContentGuard struct {
 	permissions map[string][]string
 	mu          sync.RWMutex
@@ -182,7 +185,7 @@ func generateSignedURL(objectName string) (string, error) {
 
 // generateTempPassword creates a strong, temporary password for Firebase Auth.
 func generateTempPassword() (string, error) {
-	const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*"
+	const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01234456789!@#$%^&*"
 	const length = 16
 	result := make([]byte, length)
 	for i := 0; i < length; i++ {
@@ -199,8 +202,6 @@ func generateTempPassword() (string, error) {
 func sendPasswordSetupEmail(email, link string) error {
 	log.Printf("SIMULATING SENDGRID: To %s, Setup Link: %s", email, link)
 	// *** TODO: REPLACE THIS WITH YOUR REAL SENDGRID IMPLEMENTATION ***
-	// The ResetEmailSender var should be the verified 'From' email address.
-	// You need to set up the SendGrid client and use its SDK here.
 	return nil
 }
 
@@ -306,7 +307,7 @@ func handleCreateCheckoutSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Verify Price Details (Unchanged)
+	// 1. Verify Price Details
 	_, err := price.Get(req.PriceID, nil)
 	if err != nil {
 		log.Printf("Invalid Stripe Price ID: %v", err)
@@ -325,23 +326,20 @@ func handleCreateCheckoutSession(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 
+		// Explicitly expand the intents for the webhook to reliably get the PM ID
 		Expand: []*string{
 			stripe.String("payment_intent"),
 			stripe.String("setup_intent"),
 		},
 
-		// *** FIX: REMOVED CustomerCreation PARAMETER ***
-		// It is invalid in 'subscription' mode. Stripe handles customer creation automatically.
-
-		// BillingAddressCollection is allowed in subscription mode.
 		BillingAddressCollection: stripe.String(string(stripe.CheckoutSessionBillingAddressCollectionRequired)),
 
-		// Set these to your actual success/cancel pages
 		SuccessURL: stripe.String("http://localhost:5000/dashboard?session_id={CHECKOUT_SESSION_ID}"),
 		CancelURL:  stripe.String("http://localhost:5000/"),
 	}
 
-	s, err := session.New(params)
+	// Use the aliased package name 'checkoutsession' (FIXED)
+	s, err := checkoutsession.New(params)
 	if err != nil {
 		log.Printf("Failed to create Stripe Checkout Session: %v", err)
 		http.Error(w, "Could not initiate checkout.", http.StatusInternalServerError)
@@ -352,17 +350,13 @@ func handleCreateCheckoutSession(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"sessionId": s.ID})
 }
 
-// handleRegister is removed. It is replaced by handleStripeWebhook.
 // handleStripeWebhook securely creates the Firebase user and Firestore profile after successful payment.
 // It also sets the successful payment method as the default for the customer in Stripe.
-// handleStripeWebhook processes events from Stripe, primarily checkout.session.completed,
-// to create the Firebase user, set the Firestore plan, and save the default payment method.
 func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	// 1. Verify and Read Webhook Payload
 	const MaxBodyBytes = int64(65536)
 	payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
 	if err != nil {
-		log.Printf("Error reading request body: %v", err)
 		http.Error(w, "Error reading request body", http.StatusServiceUnavailable)
 		return
 	}
@@ -390,7 +384,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		var checkoutSession stripe.CheckoutSession
 		if err := json.Unmarshal(event.Data.Raw, &checkoutSession); err != nil {
 			log.Printf("Error unmarshalling session: %v", err)
-			w.WriteHeader(http.StatusOK) // Acknowledge to prevent retries
+			w.WriteHeader(http.StatusOK)
 			return
 		}
 
@@ -404,7 +398,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		stripeCustomerID := checkoutSession.Customer.ID
 		subID := checkoutSession.Subscription.ID
 
-		// Safely extract Intent IDs (rely on Step 1 fix: expanding them in Checkout Session)
+		// Safely extract Intent IDs
 		var paymentIntentID string
 		if checkoutSession.PaymentIntent != nil {
 			paymentIntentID = checkoutSession.PaymentIntent.ID
@@ -416,13 +410,21 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 
 		ctx := r.Context()
 
-		// A. Get Plan Details with Expansion for Product Name
+		// A. Get Plan Details (Uses subscription package)
 		subParams := &stripe.SubscriptionParams{}
+		// Expand Price's Product to get the name if Nickname is missing
 		subParams.AddExpand("items.data.price.product")
 
 		sub, err := subscription.Get(subID, subParams)
 		if err != nil {
 			log.Printf("Error fetching subscription %s: %v", subID, err)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// Defensive check
+		if len(sub.Items.Data) == 0 || sub.Items.Data[0].Price == nil {
+			log.Printf("FATAL: Subscription %s missing price data.", subID)
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -439,7 +441,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 			log.Printf("WARNING: Using Price ID %s as plan name.", regPlan)
 		}
 
-		// Plan Normalization for Content Guard (e.g., "Elite Membership" -> "elite")
+		// Plan Normalization for Content Guard
 		regPlan = strings.ToLower(regPlan)
 		regPlan = strings.TrimSuffix(regPlan, " membership")
 		regPlan = strings.TrimSpace(regPlan)
@@ -466,7 +468,7 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// 3. Fallback: Get PM ID directly from Subscription object
+		// 3. Fallback to Subscription's Default PM
 		if pmID == "" && sub.DefaultPaymentMethod != nil {
 			pmID = sub.DefaultPaymentMethod.ID
 			log.Printf("Fallback: Retrieved PM ID %s directly from Subscription object.", pmID)
@@ -475,6 +477,8 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		if pmID != "" {
 			log.Printf("Attempting to set default payment method %s for customer %s", pmID, stripeCustomerID)
 
+			// FIX: Correctly use *stripe.CustomerParams for the customer.Update call
+			// FIX: Use *stripe.CustomerInvoiceSettingsParams for the nested type (FINAL FIX)
 			customerParams := &stripe.CustomerParams{
 				InvoiceSettings: &stripe.CustomerInvoiceSettingsParams{
 					DefaultPaymentMethod: stripe.String(pmID),
@@ -490,16 +494,16 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// C. Create the Firebase User & Firestore Profile
+
 		userRecord, err := authClient.GetUserByEmail(ctx, regEmail)
 		var firebaseUID string
 		var isNewUser bool = false
-		// userRecord and isNewUser are used below, fixing the compiler warning.
 
 		if err != nil {
 			// User does not exist, create them
-			tempPass, passErr := generateTempPassword()
-			if passErr != nil {
-				log.Printf("Failed to generate temp password: %v", passErr)
+			tempPass, err := generateTempPassword()
+			if err != nil {
+				log.Printf("Failed to generate temp password: %v", err)
 				w.WriteHeader(http.StatusOK)
 				return
 			}
@@ -528,8 +532,8 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 
 		// D. Create/Update FINAL, PERMANENT Firestore profile
 		finalProfile := map[string]any{
-			"plan":         regPlan, // The normalized plan name (e.g., "elite")
-			"stripeID":     stripeCustomerID,
+			"plan":         regPlan,
+			"stripeID":     stripeCustomerID, // Save the Stripe ID for the customer portal
 			"name":         regName,
 			"email":        regEmail,
 			"registeredAt": firestore.ServerTimestamp,
@@ -542,12 +546,12 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 
 		// E. Generate and Send Password Setup Link (Only for newly created users)
 		if isNewUser {
-			resetLink, linkErr := authClient.PasswordResetLink(ctx, regEmail)
-			if linkErr != nil {
-				log.Printf("Failed to generate password reset link: %v", linkErr)
+			resetLink, err := authClient.PasswordResetLink(ctx, regEmail)
+			if err != nil {
+				log.Printf("Failed to generate password reset link: %v", err)
 			} else {
-				if emailErr := sendPasswordSetupEmail(regEmail, resetLink); emailErr != nil {
-					log.Printf("Failed to send setup email: %v", emailErr)
+				if err := sendPasswordSetupEmail(regEmail, resetLink); err != nil {
+					log.Printf("Failed to send setup email: %v", err)
 				}
 			}
 		}
@@ -562,20 +566,53 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// handleCreateCustomerPortalSession securely generates a URL for the Stripe Customer Portal.
+func handleCreateCustomerPortalSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 1. Authenticate user and get their profile data (including StripeID)
+	user := getAuthenticatedUserFromCookie(r)
+	if user == nil || user.StripeID == "" {
+		log.Printf("Unauthorized or missing Stripe ID for portal request.")
+		http.Error(w, "Unauthorized or no active subscription found.", http.StatusForbidden)
+		return
+	}
+
+	// 2. Create the Billing Portal Session
+	params := &stripe.BillingPortalSessionParams{
+		Customer:  stripe.String(user.StripeID),
+		ReturnURL: stripe.String("http://localhost:5000/dashboard"), // Redirect back to the dashboard when done
+	}
+
+	// Use the aliased package name 'portalsession' (FIXED)
+	s, err := portalsession.New(params)
+	if err != nil {
+		log.Printf("Failed to create Stripe Billing Portal session for customer %s: %v", user.StripeID, err)
+		http.Error(w, "Could not create customer portal session.", http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Return the secure URL to the frontend
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"url": s.URL})
+}
+
 // handleCheckoutSuccess processes the redirect from Stripe's success URL.
-// It retrieves the session, creates a Firebase token, and logs the user in.
 func handleCheckoutSuccess(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("session_id")
 
 	// If no session_id, just serve the dashboard page (or redirect to home if not logged in)
 	if sessionID == "" {
-		// Since we have no content guard here, we just pass control back to Caddy/Static Root
 		http.ServeFile(w, r, filepath.Join(StaticRoot, "dashboard", "index.html"))
 		return
 	}
 
 	// 1. Retrieve the Checkout Session
-	s, err := session.Get(sessionID, nil)
+	// Use the aliased package name 'checkoutsession' and its Get method (FIXED)
+	s, err := checkoutsession.Get(sessionID, nil)
 	if err != nil {
 		log.Printf("Error fetching Stripe session %s: %v", sessionID, err)
 		http.Error(w, "Could not verify payment session.", http.StatusInternalServerError)
@@ -592,12 +629,9 @@ func handleCheckoutSuccess(w http.ResponseWriter, r *http.Request) {
 	regEmail := s.CustomerDetails.Email
 
 	// 3. Find the Firebase User created by the Webhook
-	// NOTE: This assumes the webhook has already run. If the webhook is delayed, this will fail.
 	userRecord, err := authClient.GetUserByEmail(r.Context(), regEmail)
 	if err != nil {
 		log.Printf("Error finding Firebase user for %s (Webhook delay?): %v", regEmail, err)
-		// Crucial safety check: If user not found, redirect to a login/wait page.
-		// For now, we will just error out until the webhook is confirmed to run correctly.
 		http.Error(w, "User not yet provisioned. Try logging in shortly.", http.StatusAccepted)
 		return
 	}
@@ -677,7 +711,7 @@ func handleSessionLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleSession remains unchanged
+// handleSession now includes the NextRenewal date in the API response
 func handleSession(w http.ResponseWriter, r *http.Request) {
 	user := getAuthenticatedUserFromCookie(r)
 
@@ -687,6 +721,12 @@ func handleSession(w http.ResponseWriter, r *http.Request) {
 			registeredAtStr = user.RegisteredAt.Format("Jan 2, 2006")
 		}
 
+		// MISSING PIECE 1: Format the next renewal date
+		nextRenewalStr := ""
+		if !user.NextRenewal.IsZero() {
+			nextRenewalStr = user.NextRenewal.Format("Jan 2, 2006")
+		}
+
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]any{
 			"loggedIn":     true,
@@ -694,6 +734,7 @@ func handleSession(w http.ResponseWriter, r *http.Request) {
 			"email":        user.Email,
 			"name":         user.Name,
 			"registeredAt": registeredAtStr,
+			"nextRenewal":  nextRenewalStr,
 		})
 		return
 	}
@@ -705,7 +746,8 @@ func handleSession(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// getAuthenticatedUserFromCookie remains unchanged
+// getAuthenticatedUserFromCookie now fetches the StripeID from Firestore.
+// getAuthenticatedUserFromCookie now fetches the StripeID from Firestore and the renewal date from Stripe.
 func getAuthenticatedUserFromCookie(r *http.Request) *AuthUser {
 	// 1. Read the Firebase Session Cookie
 	cookie, err := r.Cookie("__session")
@@ -727,10 +769,11 @@ func getAuthenticatedUserFromCookie(r *http.Request) *AuthUser {
 		userEmail = ""
 	}
 
-	// 4. Fetch custom plan data from Firestore
+	// 4. Fetch custom plan data and StripeID from Firestore
 	userPlan := "basic"
 	userName := ""
 	var registeredAt time.Time
+	var stripeID string
 
 	if firestoreClient != nil {
 		dsnap, err := firestoreClient.Collection("users").Doc(token.UID).Get(r.Context())
@@ -745,18 +788,49 @@ func getAuthenticatedUserFromCookie(r *http.Request) *AuthUser {
 			if ts, found := data["registeredAt"].(time.Time); found {
 				registeredAt = ts
 			}
+			if s, found := data["stripeID"].(string); found {
+				stripeID = s
+			}
 		} else if err != nil {
 			log.Printf("Warning: Failed to fetch user profile for %s from Firestore: %v", token.UID, err)
 		}
 	}
 
-	// 5. Return the full AuthUser profile
+	// 5. Fetch Active Subscription Details from Stripe
+	var nextRenewal time.Time
+	if stripeID != "" {
+		subParams := &stripe.SubscriptionListParams{
+			Customer: stripe.String(stripeID),
+			Status:   stripe.String("active"),
+			// FIX: EXPAND the 'items' array to access SubscriptionItem fields
+			Expand: []*string{stripe.String("data.items")},
+		}
+
+		i := subscription.List(subParams)
+		if i.Next() {
+			activeSub := i.Subscription()
+
+			// FIX: Access CurrentPeriodEnd from the first SubscriptionItem
+			if activeSub.Items != nil && len(activeSub.Items.Data) > 0 {
+				// The SubscriptionItem holds the CurrentPeriodEnd
+				nextRenewal = time.Unix(activeSub.Items.Data[0].CurrentPeriodEnd, 0)
+			} else {
+				log.Printf("Warning: Subscription items not available or expanded for subscription %s", activeSub.ID)
+			}
+		} else if i.Err() != nil {
+			log.Printf("Warning: Failed to list active subscriptions for customer %s: %v", stripeID, i.Err())
+		}
+	}
+
+	// 6. Return the full AuthUser profile
 	return &AuthUser{
 		UID:          token.UID,
 		Email:        userEmail,
 		Plan:         userPlan,
 		Name:         userName,
 		RegisteredAt: registeredAt,
+		NextRenewal:  nextRenewal,
+		StripeID:     stripeID,
 	}
 }
 
@@ -805,6 +879,9 @@ func main() {
 	http.HandleFunc("/api/create-checkout-session", handleCreateCheckoutSession)
 	http.HandleFunc("/api/stripe-webhook", handleStripeWebhook)
 	http.HandleFunc("/dashboard/", handleCheckoutSuccess)
+
+	// NEW: Handler for Customer Portal
+	http.HandleFunc("/api/create-customer-portal-session", handleCreateCustomerPortalSession)
 
 	// Existing Session/Login Handlers
 	http.HandleFunc("/api/sessionLogin", handleSessionLogin)
