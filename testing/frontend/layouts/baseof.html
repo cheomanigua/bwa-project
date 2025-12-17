@@ -34,14 +34,14 @@
 
     <script>
         // 2. Define the global constant and function in a single block SECOND
-        
+
         // **IMPORTANT**: Replace 'pk_test_XXXXXXXXXXXXXXXXXXXXXXXX' with your actual Stripe Publishable Key
 				const stripeKey = '{{ .Site.Params.stripePublishableKey }}';
         const stripe = Stripe(stripeKey);
 
         // Define the function globally
-        async function startCheckout(event, priceId) {
-            event.preventDefault(); 
+        async function startCheckout(event, planName) {
+            event.preventDefault();
 
             // Visually indicate processing
             const button = event.target;
@@ -54,7 +54,7 @@
                 const response = await fetch('{{ "/api/create-checkout-session" | absURL }}', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ priceId: priceId }),
+                    body: JSON.stringify({ planName: planName }),
                 });
 
                 if (!response.ok) {
@@ -87,7 +87,7 @@
             }
         }
     </script>
-    
+
     <script type="module">
   // --- Global Initialization & Imports ---
   import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
