@@ -48,6 +48,14 @@ var (
 	ResetEmailSender    = getEnv("RESET_EMAIL_SENDER", "noreply@yourdomain.com") // Sender for setup emails
 )
 
+// Reverse mapping: Stripe Price ID → plan name (basic/pro/elite)
+// Map Stripe Price ID → friendly plan name (must match hugo.toml exactly)
+var stripePlanMap = map[string]string{
+	getEnv("STRIPE_PRICE_BASIC", "price_1SeJiGASlOB9XtLr4Eh1sFKQ"): "basic",
+	getEnv("STRIPE_PRICE_PRO", "price_1SeJhZASlOB9XtLrwhqZJIOz"):   "pro",
+	getEnv("STRIPE_PRICE_ELITE", "price_1SeJYfASlOB9XtLrAATjV41F"): "elite",
+}
+
 // --- Domain Models ---
 
 type UserRegistration struct {
@@ -433,18 +441,23 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 
 		// Get plan name (Nickname -> Product Name -> Price ID)
 		regPlan := price.Nickname
-		if regPlan == "" && price.Product != nil {
-			regPlan = price.Product.Name
-		}
-		if regPlan == "" {
-			regPlan = price.ID
-			log.Printf("WARNING: Using Price ID %s as plan name.", regPlan)
+		// if regPlan == "" && price.Product != nil {
+		// 	regPlan = price.Product.Name
+		// }
+		// if regPlan == "" {
+		// 	regPlan = price.ID
+		// 	log.Printf("WARNING: Using Price ID %s as plan name.", regPlan)
+		// }
+
+		// regPlan := "basic" // default fallback
+		if planName, ok := stripePlanMap[price.ID]; ok {
+			regPlan = planName
 		}
 
 		// Plan Normalization for Content Guard
-		regPlan = strings.ToLower(regPlan)
-		regPlan = strings.TrimSuffix(regPlan, " membership")
-		regPlan = strings.TrimSpace(regPlan)
+		// regPlan = strings.ToLower(regPlan)
+		// regPlan = strings.TrimSuffix(regPlan, " membership")
+		// regPlan = strings.TrimSpace(regPlan)
 
 		regEmail := checkoutSession.CustomerDetails.Email
 		regName := checkoutSession.CustomerDetails.Name
@@ -557,9 +570,75 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 3. Handle Other Events (Subscription changes)
-	if event.Type == "customer.subscription.deleted" || event.Type == "customer.subscription.updated" {
-		log.Printf("Subscription event received: %s. Implement logic to update user plan.", event.Type)
+	// 3. Handle subscription updates from Customer Portal (plan changes)
+	if event.Type == "customer.subscription.updated" {
+		var sub stripe.Subscription
+		if err := json.Unmarshal(event.Data.Raw, &sub); err != nil {
+			log.Printf("Error unmarshalling subscription on update: %v", err)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// We only care about active subscriptions with a customer and price
+		if sub.Customer == nil || sub.Status != "active" && sub.Status != "trialing" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if len(sub.Items.Data) == 0 || sub.Items.Data[0].Price == nil {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		priceID := sub.Items.Data[0].Price.ID
+
+		newPlan := "basic" // safe default
+		if planName, ok := stripePlanMap[priceID]; ok {
+			newPlan = planName
+		}
+
+		// Extract plan name (same logic as during initial checkout)
+		// newPlan := price.Nickname
+		// if newPlan == "" && price.Product != nil {
+		// 	newPlan = price.Product.Name
+		// }
+		// if newPlan == "" {
+		// 	newPlan = price.ID // fallback
+		// }
+
+		// Normalize plan name
+		// newPlan = strings.ToLower(newPlan)
+		// newPlan = strings.TrimSuffix(newPlan, " membership")
+		// newPlan = strings.TrimSpace(newPlan)
+
+		stripeCustomerID := sub.Customer.ID
+
+		// Find the user in Firestore by stripeID
+		ctx := r.Context()
+		iter := firestoreClient.Collection("users").
+			Where("stripeID", "==", stripeCustomerID).
+			Limit(1).Documents(ctx)
+
+		dsnap, err := iter.Next()
+		if err != nil {
+			log.Printf("No user found for Stripe customer %s during plan update", stripeCustomerID)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		uid := dsnap.Ref.ID
+
+		// Update the plan field in Firestore
+		_, err = firestoreClient.Collection("users").Doc(uid).Update(ctx, []firestore.Update{
+			{
+				Path:  "plan",
+				Value: newPlan,
+			},
+		})
+		if err != nil {
+			log.Printf("Failed to update plan in Firestore for UID %s: %v", uid, err)
+		} else {
+			log.Printf("Successfully updated plan to '%s' for user %s after subscription update", newPlan, uid)
+		}
 	}
 
 	// Acknowledge the webhook successfully
@@ -665,6 +744,66 @@ func handleCheckoutSuccess(w http.ResponseWriter, r *http.Request) {
 
 	// 6. Redirect to the clean dashboard page (without the session_id query param)
 	http.Redirect(w, r, "/dashboard", http.StatusFound)
+}
+
+// handleDeleteAccount deletes the authenticated user's account
+func handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	user := getAuthenticatedUserFromCookie(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	ctx := r.Context()
+
+	// 1. Cancel active Stripe subscription if exists
+	if user.StripeID != "" {
+		subParams := &stripe.SubscriptionListParams{
+			Customer: stripe.String(user.StripeID),
+			Status:   stripe.String("active"),
+		}
+		iter := subscription.List(subParams)
+		for iter.Next() {
+			sub := iter.Subscription()
+			_, err := subscription.Cancel(sub.ID, nil)
+			if err != nil {
+				log.Printf("Failed to cancel subscription %s for user %s: %v", sub.ID, user.UID, err)
+				// Continue anyway – don't block deletion
+			} else {
+				log.Printf("Canceled subscription %s for user %s", sub.ID, user.UID)
+			}
+		}
+	}
+
+	// 2. Delete Firestore document
+	_, err := firestoreClient.Collection("users").Doc(user.UID).Delete(ctx)
+	if err != nil {
+		log.Printf("Failed to delete Firestore doc for %s: %v", user.UID, err)
+	}
+
+	// 3. Delete Firebase Auth user
+	err = authClient.DeleteUser(ctx, user.UID)
+	if err != nil {
+		log.Printf("Failed to delete Firebase user %s: %v", user.UID, err)
+		http.Error(w, "Failed to delete account", http.StatusInternalServerError)
+		return
+	}
+
+	// 4. Clear session cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:   "__session",
+		Value:  "",
+		MaxAge: -1,
+		Path:   "/",
+	})
+
+	log.Printf("Account deleted for user %s", user.UID)
+	w.WriteHeader(http.StatusOK)
 }
 
 // handleSessionLogin remains unchanged
@@ -879,6 +1018,7 @@ func main() {
 	http.HandleFunc("/api/create-checkout-session", handleCreateCheckoutSession)
 	http.HandleFunc("/api/stripe-webhook", handleStripeWebhook)
 	http.HandleFunc("/dashboard/", handleCheckoutSuccess)
+	http.HandleFunc("/api/delete-account", handleDeleteAccount)
 
 	// NEW: Handler for Customer Portal
 	http.HandleFunc("/api/create-customer-portal-session", handleCreateCustomerPortalSession)

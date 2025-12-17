@@ -40,7 +40,10 @@
   <div class="dashboard-actions">
     <h2 class="f4 b mb2">Account Settings</h2>
     <div class="btn-group">
-      <button class="grow bg-dark-red white pa3 br2 bn pointer">
+      <button
+        class="grow bg-dark-red white pa3 br2 bn pointer"
+        onclick="deleteAccount()"
+      >
         Delete Account
       </button>
       <button class="grow bg-gray white pa3 br2 bn pointer">
@@ -115,5 +118,37 @@
       alert("A network error occurred. Please try again.");
     }
   }
+
+  // NEW FUNCTION: Delete user and customer account
+  async function deleteAccount() {
+    if (
+      !confirm(
+        "Are you sure you want to delete your account? This action cannot be undone and will cancel any active subscription.",
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/delete-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Error deleting account:", errorText);
+        alert("Failed to delete account. Please try again or contact support.");
+        return;
+      }
+
+      alert("Your account has been successfully deleted.");
+      window.location.href = "/";
+    } catch (error) {
+      console.error("Network error during account deletion:", error);
+      alert("A network error occurred. Please try again.");
+    }
+  }
 </script>
+
 {{ end }}
