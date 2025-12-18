@@ -1,4 +1,6 @@
 {{ define "main" }}
+<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+
 <section class="dashboard-section">
   <h1 class="tc mb3">{{ .Title }}</h1>
 
@@ -7,7 +9,9 @@
     <ul class="dashboard-info">
       <li><strong>Name:</strong> <span id="user-name">Loading...</span></li>
       <li><strong>Email:</strong> <span id="user-email">Loading...</span></li>
-      <li><strong>Current Plan:</strong> <span id="user-plan">Loading...</span></li>
+      <li>
+        <strong>Current Plan:</strong> <span id="user-plan">Loading...</span>
+      </li>
       <li>
         <strong>Subscription Created:</strong>
         <span id="user-created">Loading...</span>
@@ -22,8 +26,7 @@
   <div class="dashboard-actions">
     <h2 class="f4 b mb2">Manage Subscription</h2>
     <p class="mb2">
-      You will be securely redirected to the Stripe Customer Portal to update
-      payment details, change plans, and view billing history.
+      Update payment details or view billing history via Stripe.
     </p>
     <div class="btn-group">
       <button
@@ -40,38 +43,106 @@
     <div class="btn-group">
       <button
         class="grow bg-dark-red white pa3 br2 bn pointer"
-        onclick="deleteAccount()"
+        onclick="openModal('delete')"
       >
         Delete Account
       </button>
-
-      <button 
+      <button
         class="grow bg-orange white pa3 br2 bn pointer"
-        onclick="togglePasswordForm()"
+        onclick="openModal('password')"
       >
         Change Password
       </button>
-
       <button class="grow bg-gray white pa3 br2 bn pointer">
         Contact Support
       </button>
     </div>
+  </div>
+</section>
 
-    <div id="change-password-container" class="dn mt3 pa3 ba b--light-gray br2 bg-near-white">
-      <form id="password-form" hx-post="/api/change-password" hx-target="#password-feedback">
+<div
+  id="modal-overlay"
+  class="dn fixed absolute--fill flex items-center justify-center z-999"
+  style="
+    background-color: rgba(0, 0, 0, 0.8);
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: none;
+  "
+>
+  <div class="bg-white pa4 br2 w-90 mw7 center shadow-5 relative">
+    <button
+      class="absolute top-0 right-1 f3 pointer bn bg-transparent pa2"
+      onclick="closeModal()"
+    >
+      &times;
+    </button>
+
+    <div id="modal-content-delete" class="dn">
+      <h3 class="dark-red">Delete Account</h3>
+      <p class="lh-copy">
+        Are you sure? This action is permanent and will cancel your subscription
+        immediately.
+      </p>
+      <div class="flex mt3">
+        <button
+          class="ph3 pv2 bg-dark-red white bn br2 grow pointer mr2"
+          hx-post="/api/delete-account"
+          hx-on::after-request="if(event.detail.successful) window.location.href = '/';"
+        >
+          Confirm Delete
+        </button>
+        <button
+          class="ph3 pv2 bg-gray white bn br2 grow pointer"
+          onclick="closeModal()"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+
+    <div id="modal-content-password" class="dn">
+      <h3>Change Password</h3>
+      <form
+        id="password-form"
+        hx-post="/api/change-password"
+        hx-on::after-request="if(event.detail.successful && event.detail.xhr.responseText.includes('successfully')) { setTimeout(() => { closeModal(); }, 1500); }"
+      >
         <div class="mb3">
-          <label class="db fw6 lh-copy f6" for="new-password">New Password</label>
-          <input class="pa2 input-reset ba bg-transparent w-100" type="password" name="newPassword" id="new-password" required minlength="6">
+          <label class="db fw6 lh-copy f6">New Password</label>
+          <input
+            class="pa2 input-reset ba w-100"
+            type="password"
+            name="newPassword"
+            id="new-password"
+            required
+            minlength="6"
+          />
         </div>
         <div class="mb3">
-          <label class="db fw6 lh-copy f6" for="confirm-password">Confirm New Password</label>
-          <input class="pa2 input-reset ba bg-transparent w-100" type="password" id="confirm-password" required minlength="6">
+          <label class="db fw6 lh-copy f6">Confirm New Password</label>
+          <input
+            class="pa2 input-reset ba w-100"
+            type="password"
+            id="confirm-password"
+            required
+            minlength="6"
+          />
         </div>
         <div class="flex">
-          <button class="ph3 pv2 input-reset ba b--black bg-transparent grow pointer f6 dib mr2" type="submit">
-            Save New Password
+          <button
+            class="ph3 pv2 bg-orange white bn br2 grow pointer mr2"
+            type="submit"
+          >
+            Save Changes
           </button>
-          <button class="ph3 pv2 input-reset ba b--black-20 bg-light-gray grow pointer f6 dib" type="button" onclick="togglePasswordForm()">
+          <button
+            class="ph3 pv2 bg-gray white bn br2 grow pointer"
+            type="button"
+            onclick="closeModal()"
+          >
             Cancel
           </button>
         </div>
@@ -79,92 +150,74 @@
       </form>
     </div>
   </div>
-</section>
+</div>
 
 <script>
-  // --- 1. SESSION DATA & UI POPULATION ---
+  const capitalize = (s) => s && s[0].toUpperCase() + s.slice(1).toLowerCase();
+  function openModal(type) {
+    const overlay = document.getElementById("modal-overlay");
+    overlay.style.display = "flex";
+    overlay.classList.remove("dn");
+
+    document.getElementById("modal-content-delete").classList.add("dn");
+    document.getElementById("modal-content-password").classList.add("dn");
+
+    if (type === "delete")
+      document.getElementById("modal-content-delete").classList.remove("dn");
+    if (type === "password")
+      document.getElementById("modal-content-password").classList.remove("dn");
+  }
+
+  function closeModal() {
+    const overlay = document.getElementById("modal-overlay");
+    overlay.style.display = "none";
+    overlay.classList.add("dn");
+  }
+
+  document.body.addEventListener("htmx:configRequest", function (evt) {
+    if (evt.detail.elt.id === "password-form") {
+      const p1 = document.getElementById("new-password").value;
+      const p2 = document.getElementById("confirm-password").value;
+      const fb = document.getElementById("password-feedback");
+
+      if (p1 !== p2) {
+        evt.preventDefault();
+        fb.innerHTML =
+          '<span style="color: red;">Passwords do not match.</span>';
+      }
+    }
+  });
+
   document.addEventListener("DOMContentLoaded", async () => {
     try {
       const response = await fetch("/api/session");
       const userData = await response.json();
-
       if (userData.loggedIn) {
-        document.getElementById("user-name").textContent = userData.name || "N/A";
-        document.getElementById("user-email").textContent = userData.email || "N/A";
-        document.getElementById("user-plan").textContent = userData.plan ? capitalize(userData.plan) : "N/A";
-        document.getElementById("user-created").textContent = userData.registeredAt || "N/A";
-        document.getElementById("user-next-renewal").textContent = userData.nextRenewal || "N/A";
+        document.getElementById("user-name").textContent =
+          userData.name || "N/A";
+        document.getElementById("user-email").textContent =
+          userData.email || "N/A";
+        document.getElementById("user-plan").textContent = userData.plan
+          ? capitalize(userData.plan)
+          : "N/A";
+        document.getElementById("user-created").textContent =
+          userData.registeredAt || "N/A";
+        document.getElementById("user-next-renewal").textContent =
+          userData.nextRenewal || "N/A";
       } else {
         window.location.href = "/login";
       }
-    } catch (error) {
-      console.error("Failed to fetch user data:", error);
+    } catch (e) {
+      console.error(e);
     }
   });
 
-  function capitalize(s) {
-    if (typeof s !== "string") return "";
-    return s.charAt(0).toUpperCase() + s.slice(1);
-  }
-
-  // --- 2. CHANGE PASSWORD LOGIC (HTMX) ---
-  function togglePasswordForm() {
-    const container = document.getElementById('change-password-container');
-    const form = document.getElementById('password-form');
-    const feedback = document.getElementById('password-feedback');
-    
-    container.classList.toggle('dn');
-    if (container.classList.contains('dn')) {
-        form.reset();
-        feedback.innerHTML = "";
-    }
-  }
-
-  // Intercept HTMX request for double-input validation
-  document.body.addEventListener('htmx:configRequest', function(evt) {
-    if (evt.detail.elt.id === 'password-form') {
-      const p1 = document.getElementById('new-password').value;
-      const p2 = document.getElementById('confirm-password').value;
-      const fb = document.getElementById('password-feedback');
-
-      if (p1 !== p2) {
-        evt.preventDefault(); // Stop the request
-        fb.innerHTML = '<span style="color: red;">Passwords do not match.</span>';
-      } else {
-        fb.innerHTML = '<span style="color: blue;">Processing...</span>';
-      }
-    }
-  });
-
-  // Handle successful password change response
-  document.body.addEventListener('htmx:afterOnLoad', function(evt) {
-    if (evt.detail.target.id === 'password-feedback') {
-        if (evt.detail.xhr.responseText.includes('successfully')) {
-            setTimeout(() => { togglePasswordForm(); }, 2000);
-        }
-    }
-  });
-
-  // --- 3. STRIPE & ACCOUNT ACTIONS ---
   async function openCustomerPortal() {
-    try {
-      const response = await fetch("/api/create-customer-portal-session", { method: "POST" });
-      const data = await response.json();
-      if (data.url) window.location.href = data.url;
-    } catch (error) {
-      console.error("Portal error:", error);
-    }
-  }
-
-  async function deleteAccount() {
-    if (!confirm("Are you sure you want to delete your account?")) return;
-    try {
-      const response = await fetch("/api/delete-account", { method: "POST" });
-      if (response.ok) window.location.href = "/";
-    } catch (error) {
-      console.error("Deletion error:", error);
-    }
+    const response = await fetch("/api/create-customer-portal-session", {
+      method: "POST",
+    });
+    const data = await response.json();
+    if (data.url) window.location.href = data.url;
   }
 </script>
-
 {{ end }}
