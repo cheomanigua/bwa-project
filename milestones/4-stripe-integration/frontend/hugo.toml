@@ -1,0 +1,84 @@
+baseURL = 'http://localhost:5000/'
+languageCode = 'en-us'
+title = 'My New Hugo Site'
+theme = 'mytheme'
+
+[params]
+  stripePublishableKey = "pk_test_51MqjBWASlOB9XtLrplfhbiVuNqhQ5HqWc89hEKvIVRXfAFIfkfBv4EWHKlndi5dtTwPJSTvjMf0J71hSjLPCRdUb00hrD6bWeq"
+	[params.stripePlans]
+    basic = "price_1SeJiGASlOB9XtLr4Eh1sFKQ"
+    pro = "price_1SeJhZASlOB9XtLrwhqZJIOz"
+    elite = "price_1SeJYfASlOB9XtLrAATjV41F"
+
+[menus]
+  # === Visitor Menu ===
+  [[menus.main]]
+    name = 'Home'
+    pageRef = '/'
+    weight = 10
+    identifier = 'home-visitor'
+    [menus.main.params]
+      role = 'visitor'
+
+  [[menus.main]]
+    name = 'Login'
+    url = '/login'
+    weight = 20
+    identifier = 'login-visitor'
+    [menus.main.params]
+      role = 'visitor'
+
+  [[menus.main]]
+    name = 'Register'
+    url = '/register'
+    weight = 30
+    identifier = 'register-visitor'
+    [menus.main.params]
+      role = 'visitor'
+
+  # === Member Menu ===
+  [[menus.main]]
+    name = 'Home'
+    pageRef = '/'
+    weight = 10
+    identifier = 'home-member'
+    [menus.main.params]
+      role = 'member'
+
+  [[menus.main]]
+    name = 'Posts'
+    url = '/posts'
+    pageRef = '/posts'
+    weight = 20
+    identifier = 'posts-member'
+    [menus.main.params]
+      role = 'member'
+
+  [[menus.main]]
+    name = 'Account'
+    url = '/dashboard'
+    weight = 30
+    identifier = 'dashboard-member'
+    [menus.main.params]
+      role = 'member'
+
+  [[menus.main]]
+    name = 'Logout'
+    url = '#'
+    weight = 40
+    identifier = 'logout-member'
+    [menus.main.params]
+      role = 'member'
+      id = 'logout-button'
+
+
+[module]
+  [module.hugoVersion]
+    extended = false
+    min = '0.146.0'
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
+

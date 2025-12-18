@@ -1,0 +1,16 @@
+{{ define "main" }}
+  {{ .Content }}
+  {{ partial "pricing-cards.html" }}
+
+  <div class="posts-container">
+    {{ range (where .Site.RegularPages "Section" "posts").ByDate.Reverse }}
+      <div class="post-card">
+        <h2 class="f3 b mb1">
+          <a href="{{ .Permalink | absURL }}">{{ .Title }}</a>
+        </h2>
+        <p class="f5 gray lh-copy">{{ .Summary }}</p>
+      </div>
+    {{ end }}
+  </div>
+{{ end }}
+

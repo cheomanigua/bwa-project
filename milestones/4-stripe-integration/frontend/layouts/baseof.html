@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="{{ .Site.Language.Lang }}">
+<head>
+  <meta charset="UTF-8" />
+	<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+	<link rel="stylesheet" href="https://unpkg.com/tachyons@4.12.0/css/tachyons.min.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+	{{ $mainCSS := resources.Get "css/main.css" | resources.Minify | resources.Fingerprint }}
+	<link rel="stylesheet" href="{{ $mainCSS.RelPermalink | absURL }}">
+  <link rel="stylesheet" href="{{ "css/header.css" | absURL }}">
+  <link rel="stylesheet" href="{{ "css/main-menu.css" | absURL }}">
+  <link rel="stylesheet" href="{{ "css/post-cards.css" | absURL }}">
+  <link rel="stylesheet" href="{{ "css/post-cards-double.css" | absURL }}">
+  <link rel="stylesheet" href="{{ "css/pricing-cards.css" | absURL }}">
+	<link rel="stylesheet" href="{{ "css/login.css" | absURL }}">
+	<link rel="stylesheet" href="{{ "css/register.css" | absURL }}">
+	<link rel="stylesheet" href="{{ "css/dashboard.css" | absURL }}">
+
+  {{ partial "head.html" . }}
+</head>
+<body>
+  <header>
+    {{ partial "header.html" . }}
+  </header>
+  <main>
+    {{ block "main" . }}
+      {{ .Content }}
+    {{ end }}
+  </main>
+  <footer>
+    {{ partial "footer.html" . }}
+  </footer>
+
+    <script src="https://js.stripe.com/v3/"></script>
+
+    <script>
+        // 2. Define the global constant and function in a single block SECOND
+
+        // **IMPORTANT**: Replace 'pk_test_XXXXXXXXXXXXXXXXXXXXXXXX' with your actual Stripe Publishable Key
+				const stripeKey = '{{ .Site.Params.stripePublishableKey }}';
+        const stripe = Stripe(stripeKey);
+
+        // Define the function globally
+        async function startCheckout(event, planName) {
+            event.preventDefault();
+
+            // Visually indicate processing
+            const button = event.target;
+            const originalText = button.innerHTML;
+            button.innerHTML = 'Processing...';
+            button.disabled = true;
+
+            try {
+                // 1. Call the Go Backend to create a Stripe Checkout Session
+                const response = await fetch('{{ "/api/create-checkout-session" | absURL }}', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ planName: planName }),
+                });
+
+                if (!response.ok) {
+                    // Log the error response body if available
+                    const errorText = await response.text();
+                    console.error("Backend Error Response:", errorText);
+                    // Throw a specific error if the backend returned a non-200 status
+                    throw new Error(`Failed to create Stripe session. Status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                const sessionId = data.sessionId;
+
+                // 2. Redirect the user to the Stripe-hosted checkout page
+                const result = await stripe.redirectToCheckout({
+                    sessionId: sessionId
+                });
+
+                if (result.error) {
+                    alert(result.error.message);
+                }
+
+            } catch (error) {
+                console.error("Checkout process failed:", error);
+                alert("Payment initiation failed. Please check your console for details.");
+            } finally {
+                // Restore button state if the redirect fails or an error occurs
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+    </script>
+
+    <script type="module">
+  // --- Global Initialization & Imports ---
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+  import { getAuth, connectAuthEmulator, signOut } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+	import { updateNavVisibility } from '{{ "/js/auth.js" | absURL }}'; // Menu visibility logic
+
+  // Configuration (Must be consistent across all scripts)
+  const firebaseConfig = {
+    apiKey: "AIzaSy...",
+    authDomain: "my-test-project.firebaseapp.com",
+    projectId: "my-test-project",
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  connectAuthEmulator(auth, "http://localhost:9099");
+
+  document.addEventListener("DOMContentLoaded", () => {
+    // 1. Initial Menu Visibility Check (Runs on every page load)
+    updateNavVisibility();
+
+    // 2. Direct Logout Listener (Listens globally for the button click)
+    document.addEventListener("click", async (e) => {
+      if (e.target.id === "logout-button") {
+        e.preventDefault(); // Stop the link navigation
+
+        try {
+          // Clear backend session cookie
+					await fetch('{{ "/api/sessionLogout" | absURL }}', {
+            method: "POST",
+            credentials: "include",
+          });
+
+          // Clear client-side session using modern SDK
+          await signOut(auth);
+
+          // Redirect to home page
+          window.location.href = "/";
+        } catch (error) {
+          console.error("Logout failed, redirecting anyway:", error);
+          window.location.href = "/";
+        }
+      }
+    });
+  });
+</script>
+
+
+<script>
+fetch('{{ "/api/session" | absURL }}')
+  .then(res => res.json())
+  .then(data => {
+    if(data.loggedIn) {
+      document.querySelectorAll('.visitor-menu').forEach(el => el.style.display = 'none');
+      document.querySelectorAll('.member-menu').forEach(el => el.style.display = 'block');
+    } else {
+      document.querySelectorAll('.visitor-menu').forEach(el => el.style.display = 'block');
+      document.querySelectorAll('.member-menu').forEach(el => el.style.display = 'none');
+    }
+  })
+  .catch(err => console.error(err));
+</script>
+
+</body>
+</html>

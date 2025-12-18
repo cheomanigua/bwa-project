@@ -1,0 +1,47 @@
+.posts-container {
+  display: flex;
+  flex-direction: column; /* stack vertically */
+  gap: 3rem;              /* spacing between cards */
+  width: 100%;
+  max-width: 800px;       /* limits card width */
+  align-self: center;     /* centers inside main flex */
+  margin: 2rem auto 2rem auto;         /* extra safety */
+}
+
+.post-card {
+  background-color: #fff;
+  padding: 1rem 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  text-align: left;
+  width: 100%;            /* fills container */
+  box-sizing: border-box;
+}
+
+.post-card h2 {
+	text-align: center;
+	margin: 0 auto 0 auto;
+}
+
+.post-card h2 a {
+  text-decoration: none;
+  color: #222;
+}
+
+.post-card p {
+  margin: 0.25rem 0 0 0;
+  color: #555;
+  line-height: 1.5;
+}
+
+/* Responsive tweaks */
+@media (max-width: 600px) {
+  .posts-container {
+    padding: 0 0.5rem;
+  }
+
+  .post-card {
+    padding: 0.75rem 1rem;
+  }
+}
+

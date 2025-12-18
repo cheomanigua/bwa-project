@@ -1,0 +1,113 @@
+version: "3.9"
+
+services:
+  # ----------------------------------------------------------------
+  # 1. Firebase Emulator (Auth + Firestore)
+  # ----------------------------------------------------------------
+  firebase:
+    build:
+      context: ./firebase
+      dockerfile: Containerfile
+    container_name: firebase
+    image: localhost/firebase-emulator:latest
+    ports:
+      - "4000:4000" # Emulator UI
+      - "8080:8080" # Firestore
+      - "9099:9099" # Auth
+    volumes:
+      - ./.firebase_data:/root/.cache/firebase/emulators
+      - ${PWD}/firebase/firebase.json:/app/firebase.json:ro
+      - ${PWD}/firebase/firestore.rules:/app/firestore.rules:ro
+      - ${PWD}/firebase/firestore.indexes.json:/app/firestore.indexes.json:ro
+      - ${PWD}/frontend/public:/app/public:ro
+    command: >
+      emulators:start
+      --project=my-test-project
+      --only=auth,firestore
+      --import=./firebase_data
+      --export-on-exit
+    networks:
+      - custom_app_network
+
+  # ----------------------------------------------------------------
+  # 2. Go Backend (API + Signed URL generator)
+  # ----------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Containerfile
+    container_name: go-backend
+    image: localhost/go-api:latest
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - STATIC_ROOT=/public
+      - CONTENT_ROOT=/app/posts
+      - FIRESTORE_EMULATOR_HOST=firebase:8080
+      - FIREBASE_AUTH_EMULATOR_HOST=firebase:9099
+      - PROJECT_ID=my-test-project
+      - GCLOUD_PROJECT=my-test-project
+      - GOOGLE_CLOUD_PROJECT=my-test-project
+      - GCS_EMULATOR_HOST=gcs-emulator:9000
+      - GCS_BUCKET=content
+      - GCS_ACCESS_ID=localhost
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+    volumes:
+      - ${PWD}/frontend/public:/public:ro
+      - ${PWD}/frontend/content/posts:/app/posts:ro
+    depends_on:
+      - firebase
+      - gcs-emulator
+    networks:
+      - custom_app_network
+    command: ["/app/go-server", "--http=0.0.0.0:8081"]
+
+  # ----------------------------------------------------------------
+  # 3. Caddy Reverse Proxy (serves Hugo site + proxies API)
+  # ----------------------------------------------------------------
+  caddy:
+    build:
+      context: ./reverse-proxy
+      dockerfile: Containerfile
+    container_name: caddy-server
+    image: localhost/caddy-proxy:latest
+    ports:
+      - "5000:5000"
+    volumes:
+      - ${PWD}/reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${PWD}/frontend/public:/srv:ro
+    depends_on:
+      - backend
+      - firebase
+      - gcs-emulator
+    networks:
+      - custom_app_network
+
+  # ----------------------------------------------------------------
+  # 4. GCS Emulator — FINAL WORKING CONFIG FOR V4 SIGNED URLS
+  # ----------------------------------------------------------------
+  gcs-emulator:
+    image: docker.io/fsouza/fake-gcs-server:latest
+    container_name: gcs-emulator
+    ports:
+      - "9000:9000"
+    volumes:
+      - ${PWD}/frontend/public:/data/content
+    command:
+      - "-scheme"
+      - "http"
+      - "-port"
+      - "9000"
+      - "-public-host"
+      - "localhost:9000"
+    networks:
+      - custom_app_network
+
+# ------------------------------------------------------------------
+# Network
+# ------------------------------------------------------------------
+networks:
+  custom_app_network:
+    driver: bridge
