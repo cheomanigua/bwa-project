@@ -500,6 +500,49 @@ func handleSessionLogin(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 1. Identify user from existing cookie-based session logic
+	user := getAuthenticatedUserFromCookie(r)
+	if user == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<span class="red">Error: Session expired. Please log in again.</span>`)
+		return
+	}
+
+	// 2. Parse the form data sent by the HTMX request
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form data", http.StatusBadRequest)
+		return
+	}
+	newPassword := r.FormValue("newPassword")
+
+	// 3. Simple validation
+	if len(newPassword) < 6 {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<span class="red">Password must be at least 6 characters.</span>`)
+		return
+	}
+
+	// 4. Update the password via Firebase Admin SDK
+	params := (&auth.UserToUpdate{}).Password(newPassword)
+	_, err := authClient.UpdateUser(r.Context(), user.UID, params)
+	if err != nil {
+		log.Printf("Password change failed for user %s: %v", user.UID, err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<span class="red">Failed to update password in Firebase.</span>`)
+		return
+	}
+
+	// 5. Return success HTML to be swapped into the dashboard by HTMX
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `<span class="dark-green">Password changed successfully!</span>`)
+}
+
 func handleSessionLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: "__session", Value: "", MaxAge: -1, Path: "/"})
 	w.WriteHeader(http.StatusOK)
@@ -575,6 +618,7 @@ func main() {
 	http.HandleFunc("/api/stripe-webhook", handleStripeWebhook)
 	http.HandleFunc("/dashboard/", handleCheckoutSuccess)
 	http.HandleFunc("/api/delete-account", handleDeleteAccount)
+	http.HandleFunc("/api/change-password", handleChangePassword)
 	http.HandleFunc("/api/create-customer-portal-session", handleCreateCustomerPortalSession)
 	http.HandleFunc("/api/sessionLogin", handleSessionLogin)
 	http.HandleFunc("/api/sessionLogout", handleSessionLogout)

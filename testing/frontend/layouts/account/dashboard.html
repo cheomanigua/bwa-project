@@ -5,18 +5,16 @@
   <div class="dashboard-card">
     <h2 class="f4 b mb2">Account Information</h2>
     <ul class="dashboard-info">
-      <li><strong>Name:</strong> <span id="user-name">Jane Doe</span></li>
-      <li>
-        <strong>Email:</strong> <span id="user-email">jane@example.com</span>
-      </li>
-      <li><strong>Current Plan:</strong> <span id="user-plan">Pro</span></li>
+      <li><strong>Name:</strong> <span id="user-name">Loading...</span></li>
+      <li><strong>Email:</strong> <span id="user-email">Loading...</span></li>
+      <li><strong>Current Plan:</strong> <span id="user-plan">Loading...</span></li>
       <li>
         <strong>Subscription Created:</strong>
-        <span id="user-created">Jan 15, 2024</span>
+        <span id="user-created">Loading...</span>
       </li>
       <li>
         <strong>Next Renewal:</strong>
-        <span id="user-next-renewal">N/A</span>
+        <span id="user-next-renewal">Loading...</span>
       </li>
     </ul>
   </div>
@@ -46,38 +44,57 @@
       >
         Delete Account
       </button>
+
+      <button 
+        class="grow bg-orange white pa3 br2 bn pointer"
+        onclick="togglePasswordForm()"
+      >
+        Change Password
+      </button>
+
       <button class="grow bg-gray white pa3 br2 bn pointer">
         Contact Support
       </button>
+    </div>
+
+    <div id="change-password-container" class="dn mt3 pa3 ba b--light-gray br2 bg-near-white">
+      <form id="password-form" hx-post="/api/change-password" hx-target="#password-feedback">
+        <div class="mb3">
+          <label class="db fw6 lh-copy f6" for="new-password">New Password</label>
+          <input class="pa2 input-reset ba bg-transparent w-100" type="password" name="newPassword" id="new-password" required minlength="6">
+        </div>
+        <div class="mb3">
+          <label class="db fw6 lh-copy f6" for="confirm-password">Confirm New Password</label>
+          <input class="pa2 input-reset ba bg-transparent w-100" type="password" id="confirm-password" required minlength="6">
+        </div>
+        <div class="flex">
+          <button class="ph3 pv2 input-reset ba b--black bg-transparent grow pointer f6 dib mr2" type="submit">
+            Save New Password
+          </button>
+          <button class="ph3 pv2 input-reset ba b--black-20 bg-light-gray grow pointer f6 dib" type="button" onclick="togglePasswordForm()">
+            Cancel
+          </button>
+        </div>
+        <div id="password-feedback" class="mt2 f6"></div>
+      </form>
     </div>
   </div>
 </section>
 
 <script>
+  // --- 1. SESSION DATA & UI POPULATION ---
   document.addEventListener("DOMContentLoaded", async () => {
     try {
-      // 1. Fetch the user session data from the backend
       const response = await fetch("/api/session");
       const userData = await response.json();
 
       if (userData.loggedIn) {
-        // 2. Update the DOM elements with actual user data
-        document.getElementById("user-name").textContent =
-          userData.name || "N/A";
-        document.getElementById("user-email").textContent =
-          userData.email || "N/A";
-
-        // Capitalize the plan (e.g., 'basic' -> 'Basic')
-        const planText = userData.plan ? capitalize(userData.plan) : "N/A";
-        document.getElementById("user-plan").textContent = planText;
-
-        document.getElementById("user-created").textContent =
-          userData.registeredAt || "N/A";
-
-        document.getElementById("user-next-renewal").textContent =
-          userData.nextRenewal || "N/A";
+        document.getElementById("user-name").textContent = userData.name || "N/A";
+        document.getElementById("user-email").textContent = userData.email || "N/A";
+        document.getElementById("user-plan").textContent = userData.plan ? capitalize(userData.plan) : "N/A";
+        document.getElementById("user-created").textContent = userData.registeredAt || "N/A";
+        document.getElementById("user-next-renewal").textContent = userData.nextRenewal || "N/A";
       } else {
-        // If the user is not logged in, redirect to login
         window.location.href = "/login";
       }
     } catch (error) {
@@ -90,63 +107,62 @@
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
 
-  // NEW FUNCTION: Opens the Stripe Customer Portal
-  async function openCustomerPortal() {
-    try {
-      // Call the backend API to create the secure session
-      const response = await fetch("/api/create-customer-portal-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Error creating portal session:", errorText);
-        alert(
-          "Failed to access subscription management. Please ensure you are logged in and have an active subscription.",
-        );
-        return;
-      }
-
-      const data = await response.json();
-      if (data.url) {
-        // Redirect the user to the Stripe-hosted Customer Portal
-        window.location.href = data.url;
-      }
-    } catch (error) {
-      console.error("Network error during portal creation:", error);
-      alert("A network error occurred. Please try again.");
+  // --- 2. CHANGE PASSWORD LOGIC (HTMX) ---
+  function togglePasswordForm() {
+    const container = document.getElementById('change-password-container');
+    const form = document.getElementById('password-form');
+    const feedback = document.getElementById('password-feedback');
+    
+    container.classList.toggle('dn');
+    if (container.classList.contains('dn')) {
+        form.reset();
+        feedback.innerHTML = "";
     }
   }
 
-  // NEW FUNCTION: Delete user and customer account
-  async function deleteAccount() {
-    if (
-      !confirm(
-        "Are you sure you want to delete your account? This action cannot be undone and will cancel any active subscription.",
-      )
-    ) {
-      return;
-    }
+  // Intercept HTMX request for double-input validation
+  document.body.addEventListener('htmx:configRequest', function(evt) {
+    if (evt.detail.elt.id === 'password-form') {
+      const p1 = document.getElementById('new-password').value;
+      const p2 = document.getElementById('confirm-password').value;
+      const fb = document.getElementById('password-feedback');
 
-    try {
-      const response = await fetch("/api/delete-account", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Error deleting account:", errorText);
-        alert("Failed to delete account. Please try again or contact support.");
-        return;
+      if (p1 !== p2) {
+        evt.preventDefault(); // Stop the request
+        fb.innerHTML = '<span style="color: red;">Passwords do not match.</span>';
+      } else {
+        fb.innerHTML = '<span style="color: blue;">Processing...</span>';
       }
+    }
+  });
 
-      alert("Your account has been successfully deleted.");
-      window.location.href = "/";
+  // Handle successful password change response
+  document.body.addEventListener('htmx:afterOnLoad', function(evt) {
+    if (evt.detail.target.id === 'password-feedback') {
+        if (evt.detail.xhr.responseText.includes('successfully')) {
+            setTimeout(() => { togglePasswordForm(); }, 2000);
+        }
+    }
+  });
+
+  // --- 3. STRIPE & ACCOUNT ACTIONS ---
+  async function openCustomerPortal() {
+    try {
+      const response = await fetch("/api/create-customer-portal-session", { method: "POST" });
+      const data = await response.json();
+      if (data.url) window.location.href = data.url;
     } catch (error) {
-      console.error("Network error during account deletion:", error);
-      alert("A network error occurred. Please try again.");
+      console.error("Portal error:", error);
+    }
+  }
+
+  async function deleteAccount() {
+    if (!confirm("Are you sure you want to delete your account?")) return;
+    try {
+      const response = await fetch("/api/delete-account", { method: "POST" });
+      if (response.ok) window.location.href = "/";
+    } catch (error) {
+      console.error("Deletion error:", error);
     }
   }
 </script>
