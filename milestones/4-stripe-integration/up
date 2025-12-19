@@ -1,4 +1,4 @@
 cd frontend
 hugo -D --minify
 cd ..
-podman compose -f compose.dev.yaml up -d
+podman compose up -d
