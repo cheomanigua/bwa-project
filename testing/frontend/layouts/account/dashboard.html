@@ -85,29 +85,35 @@
 
     <div id="modal-content-delete" class="dn">
       <h3 class="dark-red">Delete Account</h3>
-      <p class="lh-copy">
-        Are you sure? This action is permanent and will cancel your subscription
-        immediately.
-      </p>
-      <div class="flex mt3">
-        <button
-          class="ph3 pv2 bg-dark-red white bn br2 grow pointer mr2"
-          hx-post="/api/delete-account"
-          hx-on::after-request="if(event.detail.successful) window.location.href = '/';"
-        >
-          Confirm Delete
-        </button>
-        <button
-          class="ph3 pv2 bg-gray white bn br2 grow pointer"
-          onclick="closeModal()"
-        >
-          Cancel
-        </button>
+      <div id="delete-area">
+        <p class="lh-copy">
+          Are you sure? This action is permanent and will cancel your
+          subscription and delete your account immediately.
+        </p>
+        <div class="flex mt3">
+          <button
+            class="ph3 pv2 bg-dark-red white bn br2 grow pointer mr2"
+            hx-post="/api/delete-account"
+            hx-target="#delete-area"
+          >
+            Confirm Delete
+          </button>
+          <button
+            class="ph3 pv2 bg-gray white bn br2 grow pointer"
+            onclick="closeModal()"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
 
     <div id="modal-content-password" class="dn">
       <h3>Change Password</h3>
+      <p>
+        You will be logged out when changing the password. In order to log in
+        again, you must enter your new password.
+      </p>
       <form
         id="password-form"
         hx-post="/api/change-password"

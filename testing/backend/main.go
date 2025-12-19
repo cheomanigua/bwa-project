@@ -468,23 +468,64 @@ func handleCheckoutSuccess(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	user := getAuthenticatedUserFromCookie(r)
 	if user == nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
+	// 1. Cancel Stripe Subscription if StripeID exists
 	if user.StripeID != "" {
-		iter := subscription.List(&stripe.SubscriptionListParams{Customer: stripe.String(user.StripeID), Status: stripe.String("active")})
+		iter := subscription.List(&stripe.SubscriptionListParams{
+			Customer: stripe.String(user.StripeID),
+			Status:   stripe.String("active"),
+		})
 		for iter.Next() {
 			subscription.Cancel(iter.Subscription().ID, nil)
 		}
 	}
 
+	// 2. Delete User Data from Firestore
 	firestoreClient.Collection("users").Doc(user.UID).Delete(r.Context())
-	authClient.DeleteUser(r.Context(), user.UID)
-	http.SetCookie(w, &http.Cookie{Name: "__session", Value: "", MaxAge: -1, Path: "/"})
-	w.WriteHeader(http.StatusOK)
+
+	// 3. Delete User from Firebase Auth
+	err := authClient.DeleteUser(r.Context(), user.UID)
+	if err != nil {
+		log.Printf("Failed to delete auth user: %v", err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<span class="red">Error deleting account. Please contact support.</span>`)
+		return
+	}
+
+	// 4. LOGOUT: Clear the session cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "__session",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+	})
+
+	// 5. Return the Success Message + Redirect to Home
+	// This will be injected into the modal via HTMX
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `
+		<div class="pa3 bg-washed-red br2 mt3">
+			<p class="dark-red b mb1">Account Deleted</p>
+			<p class="f6 mb2">Your subscription has been cancelled and your account has been deleted.</p>
+			<p class="f7 gray i">Redirecting to home in 5 seconds...</p>
+		</div>
+		<script>
+			setTimeout(function() {
+				window.location.href = "/";
+			}, 5000);
+		</script>
+	`)
 }
 
 func handleSessionLogin(w http.ResponseWriter, r *http.Request) {
@@ -503,70 +544,58 @@ func handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Identify user from existing cookie-based session logic
+	// 1. Identify user
 	user := getAuthenticatedUserFromCookie(r)
 	if user == nil {
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `<span class="red">Error: Session expired. Please log in again.</span>`)
+		fmt.Fprintf(w, `<span class="red">Error: Session expired.</span>`)
 		return
 	}
 
-	// 2. Parse the form data sent by the HTMX request
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Invalid form data", http.StatusBadRequest)
-		return
-	}
+	// 2. Validate password
 	newPassword := r.FormValue("newPassword")
-
-	// 3. Simple validation
 	if len(newPassword) < 6 {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `<span class="red">Password must be at least 6 characters.</span>`)
 		return
 	}
 
-	// 4. Update the password via Firebase Admin SDK
-	// Note: Updating the password revokes all existing refresh tokens/sessions.
+	// 3. Update password in Firebase
+	// This action revokes all active session tokens on the Firebase side
 	params := (&auth.UserToUpdate{}).Password(newPassword)
 	_, err := authClient.UpdateUser(r.Context(), user.UID, params)
 	if err != nil {
-		log.Printf("Password change failed for user %s: %v", user.UID, err)
+		log.Printf("Password update error: %v", err)
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `<span class="red">Failed to update password in Firebase.</span>`)
+		fmt.Fprintf(w, `<span class="red">Failed to update password.</span>`)
 		return
 	}
 
-	// --- SESSION REFRESH LOGIC ---
-	// Since the password change invalidated the old session, we must create a new one.
+	// 4. LOGOUT: Clear the local __session cookie
+	// We do this so the browser doesn't try to use an invalidated cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "__session",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1, // Tells browser to delete immediately
+		HttpOnly: true,
+	})
 
-	// 1. Generate a custom token for the user
-	customToken, err := authClient.CustomToken(r.Context(), user.UID)
-	if err == nil {
-		// 2. Create a new session cookie (valid for 5 days)
-		expiresIn := 24 * 5 * time.Hour
-		newCookie, err := authClient.SessionCookie(r.Context(), customToken, expiresIn)
-		if err == nil {
-			// 3. Set the NEW cookie in the browser
-			http.SetCookie(w, &http.Cookie{
-				Name:     "__session",
-				Value:    newCookie,
-				MaxAge:   int(expiresIn.Seconds()),
-				HttpOnly: true,
-				Path:     "/",
-				SameSite: http.SameSiteLaxMode,
-			})
-		}
-
-		// 4. Tell HTMX to refresh the page.
-		// This reload will use the new cookie we just set, keeping the user logged in.
-		w.Header().Set("HX-Refresh", "true")
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	// Fallback: If refresh logic fails, the user will be sent to the login screen on next interaction.
+	// 5. Return the HTML message + Redirect Script
+	// This will be injected into #password-feedback via HTMX
 	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `<span class="red">Password changed, but session refresh failed. Please log in again.</span>`)
+	fmt.Fprintf(w, `
+		<div class="pa3 bg-washed-green br2 mt3">
+			<p class="dark-green b mb1">Success!</p>
+			<p class="f6 mb2">To log in again, use your new password.</p>
+			<p class="f7 gray i">Redirecting to login in 5 seconds...</p>
+		</div>
+		<script>
+			setTimeout(function() {
+				window.location.href = "/login";
+			}, 5000);
+		</script>
+	`)
 }
 
 func handleContactSupport(w http.ResponseWriter, r *http.Request) {

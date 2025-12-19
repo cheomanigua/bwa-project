@@ -32,8 +32,8 @@
   </form>
   <!-- CTA for users who haven't registered -->
   <p class="mt2 register-cta">
-    Don’t have an account?
-    <a href="/register" class="register-link">Register here</a>
+    Forgot your password?
+    <a href="/register" class="register-link">Reset here</a>
   </p>
 </section>
 
@@ -41,7 +41,7 @@
   // --- REAL Firebase SDK Imports ---
   // Using CDN links to load the real Firebase modules (must be accessible by the browser)
   import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-	import { updateNavVisibility } from '{{ "/js/auth.js" | absURL }}'; // Menu visibility logic
+  import { updateNavVisibility } from '{{ "/js/auth.js" | absURL }}'; // Menu visibility logic
   import {
     getAuth,
     signInWithEmailAndPassword,
