@@ -8,6 +8,7 @@
 	{{ $mainCSS := resources.Get "css/main.css" | resources.Minify | resources.Fingerprint }}
 	<link rel="stylesheet" href="{{ $mainCSS.RelPermalink | absURL }}">
   <link rel="stylesheet" href="{{ "css/header.css" | absURL }}">
+  <link rel="stylesheet" href="{{ "css/footer.css" | absURL }}">
   <link rel="stylesheet" href="{{ "css/main-menu.css" | absURL }}">
   <link rel="stylesheet" href="{{ "css/post-cards.css" | absURL }}">
   <link rel="stylesheet" href="{{ "css/post-cards-double.css" | absURL }}">

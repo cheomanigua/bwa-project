@@ -74,3 +74,8 @@
 
 .tc { text-align: center; }
 
+#pricing {
+  /* This ensures the anchor stops 100px before the element, 
+     preventing the header from covering the title */
+  scroll-margin-top: 100px; 
+}
