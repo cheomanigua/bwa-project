@@ -75,3 +75,22 @@
   text-decoration: underline;
 }
 
+.reset-cta {
+  margin-top: 1.5rem;
+  font-size: 0.95rem;
+  text-align: center;
+  color: #555;
+}
+
+.reset-cta .reset-link {
+  color: #0b3d91;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.reset-cta .reset-link:hover {
+  color: #092d6b;
+  text-decoration: underline;
+}
+

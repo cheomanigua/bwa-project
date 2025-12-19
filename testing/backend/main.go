@@ -528,14 +528,46 @@ func handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	`)
 }
 
-func handleSessionLogin(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		IDToken string `json:"idToken"`
+func handleResetPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
-	json.NewDecoder(r.Body).Decode(&req)
-	cookie, _ := authClient.SessionCookie(r.Context(), req.IDToken, 24*5*time.Hour)
-	http.SetCookie(w, &http.Cookie{Name: "__session", Value: cookie, MaxAge: 60 * 60 * 24 * 5, HttpOnly: true, Path: "/"})
-	w.WriteHeader(http.StatusOK)
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	email := r.FormValue("email")
+	if email == "" {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<span class="red">Please enter your email address.</span>`)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Always attempt to send — but ignore errors related to user not found
+	link, err := authClient.PasswordResetLink(ctx, email)
+	if err != nil {
+		// Log the error for debugging, but don't expose it to the user
+		log.Printf("Password reset link generation failed for %s: %v", email, err)
+		// Intentionally fall through to success message
+	} else {
+		log.Printf("Password reset link generated for: %s → %s", email, link)
+		sendPasswordSetupEmail(email, link) // Simulated in dev, real in prod
+	}
+
+	// ALWAYS show the same neutral success message
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `
+		<div class="pa3 bg-washed-green br2">
+			<p class="dark-green b mb1">Check your email!</p>
+			<p class="f6">If an account exists with that email, we've sent a password reset link.</p>
+			<p class="f7 gray i">This window will close in 5 seconds...</p>
+		</div>
+	`)
 }
 
 func handleChangePassword(w http.ResponseWriter, r *http.Request) {
@@ -632,6 +664,16 @@ func handleSessionLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func handleSessionLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDToken string `json:"idToken"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	cookie, _ := authClient.SessionCookie(r.Context(), req.IDToken, 24*5*time.Hour)
+	http.SetCookie(w, &http.Cookie{Name: "__session", Value: cookie, MaxAge: 60 * 60 * 24 * 5, HttpOnly: true, Path: "/"})
+	w.WriteHeader(http.StatusOK)
+}
+
 func handleSession(w http.ResponseWriter, r *http.Request) {
 	user := getAuthenticatedUserFromCookie(r)
 	if user != nil {
@@ -702,11 +744,12 @@ func main() {
 	http.HandleFunc("/api/stripe-webhook", handleStripeWebhook)
 	http.HandleFunc("/dashboard/", handleCheckoutSuccess)
 	http.HandleFunc("/api/delete-account", handleDeleteAccount)
+	http.HandleFunc("/api/reset-password", handleResetPassword)
 	http.HandleFunc("/api/change-password", handleChangePassword)
 	http.HandleFunc("/api/contact-support", handleContactSupport)
 	http.HandleFunc("/api/create-customer-portal-session", handleCreateCustomerPortalSession)
-	http.HandleFunc("/api/sessionLogin", handleSessionLogin)
 	http.HandleFunc("/api/sessionLogout", handleSessionLogout)
+	http.HandleFunc("/api/sessionLogin", handleSessionLogin)
 	http.HandleFunc("/api/session", handleSession)
 
 	port := getEnv("PORT", "8081")

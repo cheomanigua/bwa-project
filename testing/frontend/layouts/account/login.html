@@ -28,44 +28,133 @@
     <button type="submit" class="grow bg-blue b white pa3 br2 bn pointer w-100">
       Login
     </button>
-    <p id="loginMessage" style="color: green"></p>
+    <p id="loginMessage" class="mt3 tc f6" style="color: green"></p>
   </form>
-  <!-- CTA for users who haven't registered -->
-  <p class="mt2 register-cta">
+
+  <p class="mt2 reset-cta">
     Forgot your password?
-    <a href="/register" class="register-link">Reset here</a>
+    <a href="#" class="reset-link" onclick="openModal('reset')">Reset here</a>
   </p>
 </section>
 
+<!-- HTMX required for modal submission -->
+<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+
+<!-- Modal Overlay – now same size as dashboard.html modals -->
+<div
+  id="modal-overlay"
+  class="dn fixed absolute--fill flex items-center justify-center z-999"
+  style="background-color: rgba(0, 0, 0, 0.8); display: none"
+>
+  <div class="bg-white pa4 br2 w-90 mw6 w-50-l center shadow-5 relative">
+    <button
+      class="absolute top-0 right-1 f3 pointer bn bg-transparent pa2"
+      onclick="closeModal()"
+    >
+      ×
+    </button>
+
+    <!-- Password Reset Modal Content -->
+    <div id="modal-content-reset">
+      <h3 class="mb3">Reset Password</h3>
+      <p class="lh-copy mb4 f6">
+        Enter your email address and we'll send you a link to reset your
+        password.
+      </p>
+
+      <form
+        id="reset-form"
+        hx-post="/api/reset-password"
+        hx-target="#reset-feedback"
+        hx-on::after-request="if(event.detail.successful) { setTimeout(() => { closeModal(); }, 5000); }"
+      >
+        <div class="mb3">
+          <label class="db fw6 lh-copy f6" for="reset-email">Email</label>
+          <input
+            class="pa2 input-reset ba w-100"
+            type="email"
+            name="email"
+            id="reset-email"
+            required
+            placeholder="you@example.com"
+          />
+        </div>
+
+        <div class="flex mt4">
+          <button
+            type="submit"
+            class="ph3 pv2 bg-blue white bn br2 grow pointer mr2"
+          >
+            Send Reset Link
+          </button>
+          <button
+            type="button"
+            class="ph3 pv2 bg-gray white bn br2 grow pointer"
+            onclick="closeModal()"
+          >
+            Cancel
+          </button>
+        </div>
+
+        <div id="reset-feedback" class="mt3 f6"></div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <script type="module">
-  // --- REAL Firebase SDK Imports ---
-  // Using CDN links to load the real Firebase modules (must be accessible by the browser)
+  // --- Firebase SDK Imports ---
   import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-  import { updateNavVisibility } from '{{ "/js/auth.js" | absURL }}'; // Menu visibility logic
+  import { updateNavVisibility } from '{{ "/js/auth.js" | absURL }}';
   import {
     getAuth,
     signInWithEmailAndPassword,
     connectAuthEmulator,
   } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
 
-  // NOTE: Config is for the SDK structure.
   const firebaseConfig = {
     apiKey: "AIzaSy...",
     authDomain: "my-test-project.firebaseapp.com",
     projectId: "my-test-project",
   };
 
-  // Initialize app and auth
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
 
-  // CRITICAL FIX: Point the client SDK to the Auth Emulator running on localhost:9099
+  // Connect to Auth Emulator in development
   connectAuthEmulator(auth, "http://localhost:9099");
 
+  // === MODAL FUNCTIONS – GLOBAL ACCESS ===
+  window.openModal = function (type) {
+    const overlay = document.getElementById("modal-overlay");
+
+    // Reset form and feedback
+    const feedback = document.getElementById("reset-feedback");
+    if (feedback) feedback.innerHTML = "";
+    const form = document.getElementById("reset-form");
+    if (form) form.reset();
+
+    // Show modal
+    overlay.style.display = "flex";
+    overlay.classList.remove("dn");
+
+    document.getElementById("modal-content-reset").classList.remove("dn");
+  };
+
+  window.closeModal = function () {
+    const overlay = document.getElementById("modal-overlay");
+    overlay.style.display = "none";
+    overlay.classList.add("dn");
+
+    document.getElementById("modal-content-reset").classList.add("dn");
+  };
+
+  // Update nav on load
   document.addEventListener("DOMContentLoaded", async () => {
     updateNavVisibility();
   });
 
+  // Login form handler
   document
     .getElementById("login-form")
     .addEventListener("submit", async (e) => {
@@ -75,9 +164,9 @@
       const password = document.getElementById("password").value;
       const messageElement = document.getElementById("loginMessage");
       messageElement.textContent = "Signing in via Firebase SDK...";
+      messageElement.style.color = "green";
 
       try {
-        // 1. CLIENT-SIDE SDK: Sign in directly with the Auth Emulator
         const userCredential = await signInWithEmailAndPassword(
           auth,
           email,
@@ -85,10 +174,8 @@
         );
         const idToken = await userCredential.user.getIdToken();
 
-        // 2. Store the token for future API calls
         localStorage.setItem("id_token", idToken);
 
-        // --- NEW CRITICAL STEP: Exchange ID Token for Session Cookie ---
         messageElement.textContent = "Exchanging token for secure session...";
         await fetch("/api/sessionLogin", {
           method: "POST",
@@ -98,14 +185,12 @@
         });
 
         messageElement.textContent =
-          "Success! Logged in. Redirecting to home...";
+          "Success! Logged in. Redirecting to dashboard...";
 
-        // Reload the navigation bar on the new page
         setTimeout(() => {
           window.location.href = "/dashboard";
         }, 1000);
       } catch (error) {
-        // Error handling now catches failed sign-ins from the emulator
         messageElement.textContent = `Login failed: ${error.message}`;
         messageElement.style.color = "red";
         console.error(error);
