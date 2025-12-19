@@ -26,10 +26,7 @@ import (
 	portalsession "github.com/stripe/stripe-go/v84/billingportal/session"
 	checkoutsession "github.com/stripe/stripe-go/v84/checkout/session"
 
-	//"github.com/stripe/stripe-go/v84/customer"
-	//"github.com/stripe/stripe-go/v84/paymentintent"
 	"github.com/stripe/stripe-go/v84/price"
-	//"github.com/stripe/stripe-go/v84/setupintent"
 	"github.com/stripe/stripe-go/v84/subscription"
 	"github.com/stripe/stripe-go/v84/webhook"
 	"google.golang.org/api/option"
@@ -529,6 +526,7 @@ func handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Update the password via Firebase Admin SDK
+	// Note: Updating the password revokes all existing refresh tokens/sessions.
 	params := (&auth.UserToUpdate{}).Password(newPassword)
 	_, err := authClient.UpdateUser(r.Context(), user.UID, params)
 	if err != nil {
@@ -538,9 +536,66 @@ func handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. Return success HTML to be swapped into the dashboard by HTMX
+	// --- SESSION REFRESH LOGIC ---
+	// Since the password change invalidated the old session, we must create a new one.
+
+	// 1. Generate a custom token for the user
+	customToken, err := authClient.CustomToken(r.Context(), user.UID)
+	if err == nil {
+		// 2. Create a new session cookie (valid for 5 days)
+		expiresIn := 24 * 5 * time.Hour
+		newCookie, err := authClient.SessionCookie(r.Context(), customToken, expiresIn)
+		if err == nil {
+			// 3. Set the NEW cookie in the browser
+			http.SetCookie(w, &http.Cookie{
+				Name:     "__session",
+				Value:    newCookie,
+				MaxAge:   int(expiresIn.Seconds()),
+				HttpOnly: true,
+				Path:     "/",
+				SameSite: http.SameSiteLaxMode,
+			})
+		}
+
+		// 4. Tell HTMX to refresh the page.
+		// This reload will use the new cookie we just set, keeping the user logged in.
+		w.Header().Set("HX-Refresh", "true")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Fallback: If refresh logic fails, the user will be sent to the login screen on next interaction.
 	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `<span class="dark-green">Password changed successfully!</span>`)
+	fmt.Fprintf(w, `<span class="red">Password changed, but session refresh failed. Please log in again.</span>`)
+}
+
+func handleContactSupport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	user := getAuthenticatedUserFromCookie(r)
+	if user == nil {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<span class="red">Error: Session expired.</span>`)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form data", http.StatusBadRequest)
+		return
+	}
+
+	subject := r.FormValue("subject")
+	message := r.FormValue("message")
+
+	// SIMULATION: In production, you would use SendGrid or an email service here.
+	log.Printf("SUPPORT TICKET RECEIVED:\nFrom: %s (%s)\nSubject: %s\nMessage: %s",
+		user.Name, user.Email, subject, message)
+
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `<span class="dark-green">Message sent successfully! Our team will contact you.</span>`)
 }
 
 func handleSessionLogout(w http.ResponseWriter, r *http.Request) {
@@ -619,6 +674,7 @@ func main() {
 	http.HandleFunc("/dashboard/", handleCheckoutSuccess)
 	http.HandleFunc("/api/delete-account", handleDeleteAccount)
 	http.HandleFunc("/api/change-password", handleChangePassword)
+	http.HandleFunc("/api/contact-support", handleContactSupport)
 	http.HandleFunc("/api/create-customer-portal-session", handleCreateCustomerPortalSession)
 	http.HandleFunc("/api/sessionLogin", handleSessionLogin)
 	http.HandleFunc("/api/sessionLogout", handleSessionLogout)

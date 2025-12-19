@@ -53,7 +53,10 @@
       >
         Change Password
       </button>
-      <button class="grow bg-gray white pa3 br2 bn pointer">
+      <button
+        class="grow bg-gray white pa3 br2 bn pointer"
+        onclick="openModal('support')"
+      >
         Contact Support
       </button>
     </div>
@@ -108,7 +111,7 @@
       <form
         id="password-form"
         hx-post="/api/change-password"
-        hx-on::after-request="if(event.detail.successful && event.detail.xhr.responseText.includes('successfully')) { setTimeout(() => { closeModal(); }, 1500); }"
+        hx-target="#password-feedback"
       >
         <div class="mb3">
           <label class="db fw6 lh-copy f6">New Password</label>
@@ -149,6 +152,52 @@
         <div id="password-feedback" class="mt2 f6"></div>
       </form>
     </div>
+
+    <div id="modal-content-support" class="dn">
+      <h3>Contact Support</h3>
+      <form
+        id="support-form"
+        hx-post="/api/contact-support"
+        hx-target="#support-feedback"
+        hx-on::after-request="if(event.detail.successful) { setTimeout(() => { closeModal(); }, 2000); }"
+      >
+        <div class="mb3">
+          <label class="db fw6 lh-copy f6">Subject</label>
+          <input
+            class="pa2 input-reset ba w-100"
+            type="text"
+            name="subject"
+            required
+            placeholder="How can we help?"
+          />
+        </div>
+        <div class="mb3">
+          <label class="db fw6 lh-copy f6">Message</label>
+          <textarea
+            class="pa2 input-reset ba w-100 h3"
+            name="message"
+            required
+            placeholder="Describe your issue..."
+          ></textarea>
+        </div>
+        <div class="flex">
+          <button
+            class="ph3 pv2 bg-blue white bn br2 grow pointer mr2"
+            type="submit"
+          >
+            Send
+          </button>
+          <button
+            class="ph3 pv2 bg-gray white bn br2 grow pointer"
+            type="button"
+            onclick="closeModal()"
+          >
+            Cancel
+          </button>
+        </div>
+        <div id="support-feedback" class="mt2 f6"></div>
+      </form>
+    </div>
   </div>
 </div>
 
@@ -156,16 +205,34 @@
   const capitalize = (s) => s && s[0].toUpperCase() + s.slice(1).toLowerCase();
   function openModal(type) {
     const overlay = document.getElementById("modal-overlay");
-    overlay.style.display = "flex";
-    overlay.classList.remove("dn");
+    //
+    // 1. Reset the form fields (Subject/Message) and feedback
+    document.getElementById("support-feedback").innerHTML = "";
+    document.getElementById("password-feedback").innerHTML = "";
+    document.getElementById("support-form").reset();
+    document.getElementById("password-form").reset();
 
+    // 2. Hide ALL modal content containers first
     document.getElementById("modal-content-delete").classList.add("dn");
     document.getElementById("modal-content-password").classList.add("dn");
+    document.getElementById("modal-content-support").classList.add("dn");
+
+    // 3. Show the specific content requested
+    const targetContent = document.getElementById(`modal-content-${type}`);
+    if (targetContent) {
+      targetContent.classList.remove("dn");
+    }
+
+    // 4. Finally, reveal the overlay by removing 'dn' and setting flex
+    overlay.classList.remove("dn");
+    overlay.style.setProperty("display", "flex", "important");
 
     if (type === "delete")
       document.getElementById("modal-content-delete").classList.remove("dn");
     if (type === "password")
       document.getElementById("modal-content-password").classList.remove("dn");
+    if (type === "support")
+      document.getElementById("modal-content-support").classList.remove("dn");
   }
 
   function closeModal() {
