@@ -9,7 +9,9 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -213,43 +215,87 @@ func hasPermission(userPlan, required string) bool {
 // --- HTTP Handlers ---
 
 func handleContentGuard(w http.ResponseWriter, r *http.Request) {
+	// 1. Authorization Logic
 	user := getAuthenticatedUserFromCookie(r)
 	userPlan := "visitor"
 	if user != nil {
 		userPlan = user.Plan
 	}
 
+	// Prepare the path for the permission check (aligning with contentGuard map)
 	requestPath := r.URL.Path
-	requestPath = strings.TrimSuffix(requestPath, "/")
-	requestPath = strings.TrimSuffix(requestPath, "/index.html")
-	requestPath = strings.TrimSuffix(requestPath, "/index")
+	permPath := strings.TrimSuffix(requestPath, "/")
+	permPath = strings.TrimSuffix(permPath, "/index.html")
+	permPath = strings.TrimSuffix(permPath, "/index")
 
-	if !contentGuard.IsAuthorized(requestPath, userPlan) {
-		w.WriteHeader(http.StatusForbidden)
+	// Check if the user is authorized
+	if !contentGuard.IsAuthorized(permPath, userPlan) {
+		log.Printf("Unauthorized access attempt: %s by plan %s", permPath, userPlan)
+
+		// Set headers for HTML error response
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `<!DOCTYPE html><html><body><h1>Access Denied</h1><p>You need a higher plan.</p></body></html>`)
+		w.WriteHeader(http.StatusForbidden)
+
+		// HTML message matching your attached example
+		fmt.Fprintf(w, `
+			<!DOCTYPE html>
+			<html><head><title>Access Denied</title></head>
+			<body>
+				<h1>Access Denied</h1>
+				<p>You need a higher plan to view this content.</p>
+				<a href="posts">Go back to Posts</a>
+			</body>
+			</html>
+		`)
 		return
 	}
 
+	// 2. Object Path Construction
 	objectPath := strings.TrimPrefix(requestPath, "/")
-	objectPath = filepath.Join(objectPath, "index.html")
-
-	signedURL, err := generateSignedURL(objectPath)
-	if err != nil {
-		http.Error(w, "Failed to generate link", http.StatusInternalServerError)
-		return
+	if !strings.Contains(path.Base(objectPath), ".") {
+		objectPath = path.Join(objectPath, "index.html")
 	}
 
-	resp, err := http.Get(signedURL)
+	// 3. Construct the Emulator API URL (Direct Mode)
+	encodedObject := url.PathEscape(objectPath)
+	emulatorURL := fmt.Sprintf("http://gcs-emulator:9000/storage/v1/b/%s/o/%s?alt=media",
+		GCSBucket,
+		encodedObject,
+	)
+
+	log.Printf("User authorized. Streaming object: %s", objectPath)
+
+	// 4. Fetch the file via HTTP GET (Direct Streaming / Version 1)
+	resp, err := http.Get(emulatorURL)
 	if err != nil {
-		http.Error(w, "Fetch error", http.StatusInternalServerError)
+		log.Printf("Network error reaching GCS emulator: %v", err)
+		http.Error(w, "Storage service unreachable", http.StatusInternalServerError)
 		return
 	}
 	defer resp.Body.Close()
 
-	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Emulator returned error %d for: %s", resp.StatusCode, objectPath)
+		http.Error(w, "Content not found", http.StatusNotFound)
+		return
+	}
+
+	// 5. Set Response Headers
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "text/html" // Default for your blog posts
+	}
+	w.Header().Set("Content-Type", contentType)
+
+	// Prevent caching to ensure auth is re-checked on every visit
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+
+	// 6. Stream the content to the client
+	w.WriteHeader(http.StatusOK)
+	_, err = io.Copy(w, resp.Body)
+	if err != nil {
+		log.Printf("Error while streaming file: %v", err)
+	}
 }
 
 // handleCreateCheckoutSession resolves the human-readable plan name to a Stripe Price ID via Lookup Keys.
