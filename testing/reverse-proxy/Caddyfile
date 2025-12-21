@@ -27,7 +27,7 @@
     }
 
     handle @preflight {
-        header Access-Control-Allow-Origin "*"         # or "http://localhost:9000"
+        header Access-Control-Allow-Origin "*"
         header Access-Control-Allow-Methods "GET, OPTIONS"
         header Access-Control-Allow-Headers "*"
         header Access-Control-Max-Age "3600"
@@ -70,13 +70,14 @@
 
     @backend path /api/* /posts/*/*
     handle @backend {
-        reverse_proxy backend:8081 {
-            transport http {
-                read_buffer 64kb
-                write_buffer 64kb
-                dial_timeout 10s
-            }
-        }
+      reverse_proxy backend:8081
+      #reverse_proxy backend:8081 {
+      #    transport http {
+      #        read_buffer 64kb
+      #        write_buffer 64kb
+      #        dial_timeout 10s
+      #    }
+      #}
     }
 
     ###########################################################
