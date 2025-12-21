@@ -243,7 +243,7 @@ func handleContentGuard(w http.ResponseWriter, r *http.Request) {
 			<body>
 				<h1>Access Denied</h1>
 				<p>You need a higher plan to view this content.</p>
-				<a href="posts">Go back to Posts</a>
+				<a href="/posts">Go back to Posts</a>
 			</body>
 			</html>
 		`)
