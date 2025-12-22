@@ -730,10 +730,17 @@ func getAuthenticatedUserFromCookie(r *http.Request) *AuthUser {
 
 func main() {
 	ctx := context.Background()
-	app, _ := firebase.NewApp(ctx, &firebase.Config{ProjectID: "my-test-project"})
+
+	// 1. Firebase App still uses your specific project ID for Auth/Firestore
+	app, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: "my-test-project"})
+	if err != nil {
+		log.Fatalf("Error initializing Firebase app: %v", err)
+	}
+
 	authClient, _ = app.Auth(ctx)
 	firestoreClient, _ = app.Firestore(ctx)
 
+	// 2. Configure GCS Client
 	gcsOpts := []option.ClientOption{}
 	emulatorHost := os.Getenv("STORAGE_EMULATOR_HOST")
 	if emulatorHost == "" {
@@ -746,11 +753,37 @@ func main() {
 		if !strings.HasPrefix(endpoint, "http") {
 			endpoint = "http://" + endpoint
 		}
-		gcsOpts = append(gcsOpts, option.WithEndpoint(endpoint), option.WithoutAuthentication())
-		log.Printf("GCS Client configured for emulator at: %s", endpoint)
-	}
-	gcsClient, _ = storage.NewClient(ctx, gcsOpts...)
 
+		gcsOpts = append(gcsOpts, option.WithEndpoint(endpoint), option.WithoutAuthentication())
+
+		// --- CRITICAL REFACTOR ---
+		// We temporarily unset the project env var so the Storage Client doesn't
+		// try to filter requests by "my-test-project", which the emulator ignores.
+		currentProject := os.Getenv("GOOGLE_CLOUD_PROJECT")
+		os.Unsetenv("GOOGLE_CLOUD_PROJECT")
+
+		var err error
+		gcsClient, err = storage.NewClient(ctx, gcsOpts...)
+
+		// Restore the variable so other Firebase services aren't affected
+		if currentProject != "" {
+			os.Setenv("GOOGLE_CLOUD_PROJECT", currentProject)
+		}
+
+		if err != nil {
+			log.Fatalf("Failed to create GCS client for emulator: %v", err)
+		}
+		log.Printf("GCS Client configured for emulator at: %s (Project ID strictness disabled)", endpoint)
+	} else {
+		// Production GCS Client
+		var err error
+		gcsClient, err = storage.NewClient(ctx, gcsOpts...)
+		if err != nil {
+			log.Fatalf("Failed to create GCS client: %v", err)
+		}
+	}
+
+	// 3. Remaining Setup
 	stripe.Key = StripeSecretKey
 
 	http.HandleFunc("/posts/", handleContentGuard)

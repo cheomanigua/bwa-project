@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
 
 # Configuration
 EMULATOR_URL="http://gcs-emulator:9000"

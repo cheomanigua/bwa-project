@@ -21,8 +21,8 @@ else
     PLAN=$(echo "$2" | tr '[:upper:]' '[:lower:]')
 fi
 
-EMAIL="${USER_NAME}@test.com"
-PASS="password123"
+EMAIL="${USER_NAME}@mail.com"
+PASS="pepepepe"
 PROJECT="my-test-project"
 
 # Generate Next Renewal Date (Current time + 30 days)

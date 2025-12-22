@@ -43,6 +43,8 @@ services:
       - "9000"
       - "-public-host"
       - "localhost:9000"
+      - "-external-url"
+      - "http://gcs-emulator:9000"
     networks:
       - custom_app_network
 
@@ -88,7 +90,7 @@ services:
       - FIREBASE_AUTH_EMULATOR_HOST=firebase:9099
       - PROJECT_ID=my-test-project
       - GCLOUD_PROJECT=my-test-project
-      - GOOGLE_CLOUD_PROJECT=my-test-project
+      - GOOGLE_CLOUD_PROJECT=test
       - GCS_EMULATOR_HOST=gcs-emulator:9000
       - GCS_BUCKET=content
       - GCS_ACCESS_ID=localhost
