@@ -13,10 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
-	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -37,7 +34,6 @@ import (
 // --- Configuration ---
 var (
 	StaticRoot          = getEnv("STATIC_ROOT", "public")
-	ContentRoot         = getEnv("CONTENT_ROOT", "../frontend/content/posts")
 	GCSBucket           = getEnv("GCS_BUCKET", "content")
 	GCSAccessID         = getEnv("GCS_ACCESS_ID", "localhost")
 	StripeSecretKey     = getEnv("STRIPE_SECRET_KEY", "sk_test_...")
@@ -64,78 +60,6 @@ type AuthUser struct {
 	RegisteredAt time.Time
 	NextRenewal  time.Time
 	StripeID     string
-}
-
-// --- Content Guard ---
-type ContentGuard struct {
-	permissions map[string][]string
-	mu          sync.RWMutex
-}
-
-var contentGuard = ContentGuard{permissions: make(map[string][]string)}
-var reFrontMatter = regexp.MustCompile(`(?s)^(?:---|\+\+\+)\s*[\r\n](.*?)[\r\n](?:---|\+\+\+)`)
-var reCategories = regexp.MustCompile(`categories\s*[:=]\s*\[([^\]]+)]`)
-
-func (cg *ContentGuard) Init() error {
-	log.Println("Initializing Content Guard...")
-	return filepath.Walk(ContentRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".md") {
-			return nil
-		}
-
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-
-		fmMatch := reFrontMatter.FindSubmatch(content)
-		if len(fmMatch) < 2 {
-			return nil
-		}
-
-		catMatch := reCategories.FindStringSubmatch(string(fmMatch[1]))
-		if len(catMatch) < 2 {
-			return nil
-		}
-
-		rawPlans := strings.Split(catMatch[1], ",")
-		var requiredPlans []string
-		for _, p := range rawPlans {
-			plan := strings.TrimSpace(strings.Trim(p, `'"`))
-			if plan != "" {
-				requiredPlans = append(requiredPlans, plan)
-			}
-		}
-
-		if len(requiredPlans) > 0 {
-			urlPath := strings.TrimPrefix(path, ContentRoot)
-			urlPath = strings.TrimSuffix(urlPath, ".md")
-			urlPath = strings.ReplaceAll(urlPath, string(filepath.Separator), "/")
-			finalURLPath := "/posts" + urlPath
-			finalURLPath = strings.TrimSuffix(finalURLPath, "/")
-			finalURLPath = strings.TrimSuffix(finalURLPath, "/index")
-
-			cg.mu.Lock()
-			cg.permissions[finalURLPath] = requiredPlans
-			cg.mu.Unlock()
-			log.Printf("ContentGuard: %s requires plans: %v", finalURLPath, requiredPlans)
-		}
-		return nil
-	})
-}
-
-func (cg *ContentGuard) IsAuthorized(path string, userPlan string) bool {
-	cg.mu.RLock()
-	defer cg.mu.RUnlock()
-
-	requiredPlans, ok := cg.permissions[path]
-	if !ok || len(requiredPlans) == 0 {
-		return true
-	}
-	if userPlan == "visitor" {
-		return false
-	}
-	return slices.Contains(requiredPlans, userPlan)
 }
 
 // --- Global Clients ---
@@ -173,36 +97,154 @@ func sendPasswordSetupEmail(email, link string) error {
 	return nil
 }
 
-func generateSignedURL(objectName string) (string, error) {
-	isEmulator := os.Getenv("GCS_EMULATOR_HOST") != ""
-	if !isEmulator {
-		opts := &storage.SignedURLOptions{
-			Method:         "GET",
-			Expires:        time.Now().Add(30 * time.Second),
-			Scheme:         storage.SigningSchemeV4,
-			GoogleAccessID: GCSAccessID,
-		}
-		return gcsClient.Bucket(GCSBucket).SignedURL(objectName, opts)
+// --- GCS Authorization Helpers ---
+
+func getRequiredPlans(ctx context.Context, objectPath string) ([]string, error) {
+	attrs, err := gcsClient.
+		Bucket(GCSBucket).
+		Object(objectPath).
+		Attrs(ctx)
+
+	if err != nil {
+		log.Printf("DEBUG: Attrs error for %s: %v", objectPath, err)
+		return nil, err
 	}
 
-	base := "http://caddy-server:5000"
-	path := fmt.Sprintf("/gcs-content/%s/%s", GCSBucket, objectName)
-	fakeExpireLocalLinux := time.Now().Add(5 * time.Second).Unix()
+	log.Printf("DEBUG: All Metadata for %s: %+v", objectPath, attrs.Metadata)
 
-	url := fmt.Sprintf("%s%s?X-Goog-Algorithm=GOOG4-RSA-SHA256"+
-		"&X-Goog-Credential=%s%%2F%s%%2Fauto%%2Fstorage%%2Fgoog4_request"+
-		"&X-Goog-Date=%s"+
-		"&X-Goog-Expires=%d"+
-		"&X-Goog-SignedHeaders=host",
-		base, path,
-		GCSAccessID,
-		time.Now().Format("20060102"),
-		time.Now().Format("20060102T150405Z"),
-		int(fakeExpireLocalLinux-time.Now().Unix()),
+	meta := attrs.Metadata["required-plans"]
+	if meta == "" {
+		log.Printf("DEBUG: No 'required-plans' key found in metadata")
+		return nil, nil
+	}
+
+	parts := strings.Split(meta, ",")
+	var plans []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			plans = append(plans, p)
+		}
+	}
+	return plans, nil
+}
+
+func isAuthorized(userPlan string, required []string) bool {
+	if len(required) == 0 {
+		return true
+	}
+
+	hierarchy := map[string]int{
+		"visitor": 0,
+		"basic":   1,
+		"pro":     2,
+		"elite":   3,
+	}
+
+	userLevel := hierarchy[userPlan]
+	for _, r := range required {
+		if userLevel >= hierarchy[r] {
+			return true
+		}
+	}
+	return false
+}
+
+// --- HTTP Handlers ---
+
+func handleContentGuard(w http.ResponseWriter, r *http.Request) {
+	log.Printf("=== handleContentGuard START === Request: %s %s (from %s)", r.Method, r.URL.Path, r.RemoteAddr)
+
+	// 1. Determine user plan
+	user := getAuthenticatedUserFromCookie(r)
+	userPlan := "visitor"
+	if user != nil {
+		userPlan = user.Plan
+		log.Printf("Authenticated user: UID=%s Email=%s Plan=%s", user.UID, user.Email, userPlan)
+	} else {
+		log.Printf("No authenticated user → treating as visitor")
+	}
+
+	// 2. Build the GCS object path
+	objectPath := strings.TrimPrefix(r.URL.Path, "/")
+	log.Printf("Raw objectPath after TrimPrefix: %q", objectPath)
+
+	if !strings.Contains(path.Base(objectPath), ".") {
+		objectPath = path.Join(objectPath, "index.html")
+		log.Printf("No file extension detected → appending index.html → %q", objectPath)
+	}
+	log.Printf("Final GCS object key: %q", objectPath)
+
+	// 3. Check required plans metadata
+	requiredPlans, err := getRequiredPlans(r.Context(), objectPath)
+	if err != nil {
+		if err == storage.ErrObjectNotExist {
+			log.Printf("CONTENT NOT FOUND → Object %q does not exist in bucket %s (metadata check failed with ErrObjectNotExist)", objectPath, GCSBucket)
+		} else {
+			log.Printf("ERROR fetching metadata for %q: %v", objectPath, err)
+		}
+		http.Error(w, "Content not found", http.StatusNotFound)
+		return
+	}
+
+	log.Printf("Object %q exists → required-plans metadata: %v", objectPath, requiredPlans)
+
+	// 4. Authorization check
+	if !isAuthorized(userPlan, requiredPlans) {
+		log.Printf("ACCESS DENIED → User plan %q does not satisfy required plans %v", userPlan, requiredPlans)
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprintf(w, `
+            <!DOCTYPE html>
+            <html><head><title>Access Denied</title></head>
+            <body>
+                <h1>Access Denied</h1>
+                <p>You need a higher plan to view this content.</p>
+                <a href="/posts">Go back to Posts</a>
+            </body>
+            </html>
+        `)
+		return
+	}
+
+	log.Printf("ACCESS GRANTED → User plan %q satisfies requirements", userPlan)
+
+	// 5. Fetch content from fake-gcs-server
+	encodedObject := url.PathEscape(objectPath)
+	emulatorURL := fmt.Sprintf(
+		"http://gcs-emulator:9000/storage/v1/b/%s/o/%s?alt=media",
+		GCSBucket,
+		encodedObject,
 	)
+	log.Printf("Fetching from emulator: %s", emulatorURL)
 
-	log.Printf("Emulator mode: fake signed URL generated: %s", url)
-	return url, nil
+	resp, err := http.Get(emulatorURL)
+	if err != nil {
+		log.Printf("ERROR reaching GCS emulator: %v", err)
+		http.Error(w, "Storage unreachable", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	log.Printf("Emulator response status: %d %s", resp.StatusCode, resp.Status)
+
+	if resp.StatusCode != http.StatusOK {
+		// Extra debug: read a bit of body in case of error response
+		bodyPreview := make([]byte, 512)
+		n, _ := resp.Body.Read(bodyPreview)
+		log.Printf("CONTENT NOT FOUND → Non-200 from emulator (body preview: %s)", string(bodyPreview[:n]))
+		http.Error(w, "Content not found", http.StatusNotFound)
+		return
+	}
+
+	log.Printf("Successfully retrieved object %q → serving to client (Content-Type: %s)", objectPath, resp.Header.Get("Content-Type"))
+
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	io.Copy(w, resp.Body)
+
+	log.Printf("=== handleContentGuard END === Served %s successfully", r.URL.Path)
 }
 
 // --- Permission Helpers ---
@@ -213,90 +255,6 @@ func hasPermission(userPlan, required string) bool {
 }
 
 // --- HTTP Handlers ---
-
-func handleContentGuard(w http.ResponseWriter, r *http.Request) {
-	// 1. Authorization Logic
-	user := getAuthenticatedUserFromCookie(r)
-	userPlan := "visitor"
-	if user != nil {
-		userPlan = user.Plan
-	}
-
-	// Prepare the path for the permission check (aligning with contentGuard map)
-	requestPath := r.URL.Path
-	permPath := strings.TrimSuffix(requestPath, "/")
-	permPath = strings.TrimSuffix(permPath, "/index.html")
-	permPath = strings.TrimSuffix(permPath, "/index")
-
-	// Check if the user is authorized
-	if !contentGuard.IsAuthorized(permPath, userPlan) {
-		log.Printf("Unauthorized access attempt: %s by plan %s", permPath, userPlan)
-
-		// Set headers for HTML error response
-		w.Header().Set("Content-Type", "text/html")
-		w.WriteHeader(http.StatusForbidden)
-
-		// HTML message matching your attached example
-		fmt.Fprintf(w, `
-			<!DOCTYPE html>
-			<html><head><title>Access Denied</title></head>
-			<body>
-				<h1>Access Denied</h1>
-				<p>You need a higher plan to view this content.</p>
-				<a href="/posts">Go back to Posts</a>
-			</body>
-			</html>
-		`)
-		return
-	}
-
-	// 2. Object Path Construction
-	objectPath := strings.TrimPrefix(requestPath, "/")
-	if !strings.Contains(path.Base(objectPath), ".") {
-		objectPath = path.Join(objectPath, "index.html")
-	}
-
-	// 3. Construct the Emulator API URL (Direct Mode)
-	encodedObject := url.PathEscape(objectPath)
-	emulatorURL := fmt.Sprintf("http://gcs-emulator:9000/storage/v1/b/%s/o/%s?alt=media",
-		GCSBucket,
-		encodedObject,
-	)
-
-	log.Printf("User authorized. Streaming object: %s", objectPath)
-
-	// 4. Fetch the file via HTTP GET (Direct Streaming / Version 1)
-	resp, err := http.Get(emulatorURL)
-	if err != nil {
-		log.Printf("Network error reaching GCS emulator: %v", err)
-		http.Error(w, "Storage service unreachable", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("Emulator returned error %d for: %s", resp.StatusCode, objectPath)
-		http.Error(w, "Content not found", http.StatusNotFound)
-		return
-	}
-
-	// 5. Set Response Headers
-	contentType := resp.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "text/html" // Default for your blog posts
-	}
-	w.Header().Set("Content-Type", contentType)
-
-	// Prevent caching to ensure auth is re-checked on every visit
-	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-
-	// 6. Stream the content to the client
-	w.WriteHeader(http.StatusOK)
-	_, err = io.Copy(w, resp.Body)
-	if err != nil {
-		log.Printf("Error while streaming file: %v", err)
-	}
-}
 
 // handleCreateCheckoutSession resolves the human-readable plan name to a Stripe Price ID via Lookup Keys.
 func handleCreateCheckoutSession(w http.ResponseWriter, r *http.Request) {
@@ -777,13 +735,23 @@ func main() {
 	firestoreClient, _ = app.Firestore(ctx)
 
 	gcsOpts := []option.ClientOption{}
-	if host := os.Getenv("GCS_EMULATOR_HOST"); host != "" {
-		gcsOpts = append(gcsOpts, option.WithEndpoint("http://"+host), option.WithoutAuthentication())
+	emulatorHost := os.Getenv("STORAGE_EMULATOR_HOST")
+	if emulatorHost == "" {
+		emulatorHost = os.Getenv("GCS_EMULATOR_HOST")
+	}
+
+	if emulatorHost != "" {
+		// The storage library needs the full /storage/v1/ endpoint for custom endpoints
+		endpoint := fmt.Sprintf("%s/storage/v1/", strings.TrimSuffix(emulatorHost, "/"))
+		if !strings.HasPrefix(endpoint, "http") {
+			endpoint = "http://" + endpoint
+		}
+		gcsOpts = append(gcsOpts, option.WithEndpoint(endpoint), option.WithoutAuthentication())
+		log.Printf("GCS Client configured for emulator at: %s", endpoint)
 	}
 	gcsClient, _ = storage.NewClient(ctx, gcsOpts...)
 
 	stripe.Key = StripeSecretKey
-	contentGuard.Init()
 
 	http.HandleFunc("/posts/", handleContentGuard)
 	http.HandleFunc("/api/create-checkout-session", handleCreateCheckoutSession)

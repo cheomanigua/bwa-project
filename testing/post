@@ -1,3 +1,0 @@
-curl -X POST http://localhost:5000/api/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@test.com","password":"123456","plan":"pro","name":"Test User"}'
