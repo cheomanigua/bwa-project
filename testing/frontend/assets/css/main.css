@@ -52,6 +52,24 @@ a {
   text-decoration: none;
 }
 
+/* Style for the category container */
+.categories {
+  font-size: 1rem;
+  margin-top: 10px;
+	font-family: monospace;
+}
+
+/* Style for each category box */
+.category {
+  display: inline-block;
+  background-color: #EEEEEE;
+  color: gray;
+  padding: 1px 4px;
+  border: 1px solid lightgray;
+  margin-right: 6px;
+  border-radius: 4px;
+}
+
 
 /* ----------------------------- */
 /* Tablet screens                */

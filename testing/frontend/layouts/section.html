@@ -1,5 +1,5 @@
 {{ define "main" }}
-  <h1>{{ .Title }}</h1>
+  <h1 class="center">{{ .Title }}</h1>
 
   {{/* Only paginate if we are in the "posts" section */}}
   {{ if eq .Section "posts" }}
@@ -14,6 +14,12 @@
           {{ else }}
             {{ truncate 150 .Plain | safeHTML }}
           {{ end }}
+					<p class="categories">
+						{{ $categories := .Params.categories }}
+						{{ range $index, $category := $categories -}}
+							<span class="category">{{ $category }}</span>
+						{{- end }}
+					</p>
         </article>
       {{ end }}
     </div>

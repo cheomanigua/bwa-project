@@ -3,12 +3,19 @@
   {{ partial "pricing-cards.html" }}
 
 	<div class="posts-container">
+		<h1 class="center">Latest Posts</h1>
   {{ range first 6 (where .Site.RegularPages "Section" "posts").ByDate.Reverse }}
     <div class="post-card">
       <h2 class="f3 b mb1">
         <a href="{{ .Permalink | absURL }}">{{ .Title }}</a>
       </h2>
       <p class="f5 gray lh-copy">{{ .Summary }}</p>
+			<p class="categories">
+				{{ $categories := .Params.categories }}
+				{{ range $index, $category := $categories -}}
+					<span class="category">{{ $category }}</span>
+				{{- end }}
+			</p>
     </div>
   {{ end }}
 </div>

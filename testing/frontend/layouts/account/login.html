@@ -105,7 +105,6 @@
 <script type="module">
   // --- Firebase SDK Imports ---
   import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-  import { updateNavVisibility } from '{{ "/js/auth.js" | absURL }}';
   import {
     getAuth,
     signInWithEmailAndPassword,
@@ -149,10 +148,6 @@
     document.getElementById("modal-content-reset").classList.add("dn");
   };
 
-  // Update nav on load
-  document.addEventListener("DOMContentLoaded", async () => {
-    updateNavVisibility();
-  });
 
   // Login form handler
   document
