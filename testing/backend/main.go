@@ -21,33 +21,12 @@ import (
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/auth"
 	"github.com/stripe/stripe-go/v84"
-
 	portalsession "github.com/stripe/stripe-go/v84/billingportal/session"
 	checkoutsession "github.com/stripe/stripe-go/v84/checkout/session"
-
 	"github.com/stripe/stripe-go/v84/price"
 	"github.com/stripe/stripe-go/v84/subscription"
 	"github.com/stripe/stripe-go/v84/webhook"
 	"google.golang.org/api/option"
-)
-
-// --- Configuration ---
-var (
-	StaticRoot          = getEnv("STATIC_ROOT", "public")
-	GCSBucket           = getEnv("GCS_BUCKET", "content")
-	GCSAccessID         = getEnv("GCS_ACCESS_ID", "localhost")
-	StripeSecretKey     = getEnv("STRIPE_SECRET_KEY", "sk_test_...")
-	StripeWebhookSecret = getEnv("STRIPE_WEBHOOK_SECRET", "whsec_...")
-	ResetEmailSender    = getEnv("RESET_EMAIL_SENDER", "noreply@yourdomain.com")
-	Domain              = getEnv("DOMAIN", "http://localhost:5000")
-)
-
-// --- Constants for Lookup Keys ---
-// These MUST match the "Lookup key" field you set in the Stripe Dashboard for each Price.
-const (
-	PlanLookupBasic = "basic_plan"
-	PlanLookupPro   = "pro_plan"
-	PlanLookupElite = "elite_plan"
 )
 
 // --- Domain Models ---
@@ -62,280 +41,144 @@ type AuthUser struct {
 	StripeID     string
 }
 
-// --- Global Clients ---
-var (
-	authClient      *auth.Client
-	firestoreClient *firestore.Client
-	gcsClient       *storage.Client
-)
-
-// --- Utility Functions ---
-
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
+type App struct {
+	auth         *auth.Client
+	firestore    *firestore.Client
+	storage      *storage.Client
+	projectID    string
+	bucket       string
+	domain       string
+	emulatorHost string
 }
 
-func generateTempPassword() (string, error) {
-	const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01234456789!@#$%^&*"
-	const length = 16
-	result := make([]byte, length)
-	for i := 0; i < length; i++ {
-		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
-		if err != nil {
-			return "", err
-		}
-		result[i] = chars[num.Int64()]
-	}
-	return string(result), nil
-}
+func main() {
+	ctx := context.Background()
 
-func sendPasswordSetupEmail(email, link string) error {
-	log.Printf("SIMULATING SENDGRID: To %s, Setup Link: %s", email, link)
-	return nil
-}
+	// 1. Config Loading
+	projectID := getEnv("PROJECT_ID", "my-test-project")
+	bucketName := getEnv("GCS_BUCKET", "content")
+	stripe.Key = os.Getenv("STRIPE_SECRET_KEY")
 
-// --- GCS Authorization Helpers ---
-
-func getRequiredPlans(ctx context.Context, objectPath string) ([]string, error) {
-	attrs, err := gcsClient.
-		Bucket(GCSBucket).
-		Object(objectPath).
-		Attrs(ctx)
-
+	// 2. Client Initialization
+	app, err := initializeApp(ctx, projectID, bucketName)
 	if err != nil {
-		log.Printf("DEBUG: Attrs error for %s: %v", objectPath, err)
-		return nil, err
+		log.Fatalf("Failed to initialize app: %v", err)
 	}
+	defer app.firestore.Close()
+	defer app.storage.Close()
 
-	log.Printf("DEBUG: All Metadata for %s: %+v", objectPath, attrs.Metadata)
+	// 3. Routing
+	mux := http.NewServeMux()
 
-	meta := attrs.Metadata["required-plans"]
-	if meta == "" {
-		log.Printf("DEBUG: No 'required-plans' key found in metadata")
-		return nil, nil
-	}
+	// Auth & Sessions
+	mux.HandleFunc("/api/sessionLogin", app.handleSessionLogin)
+	mux.HandleFunc("/api/sessionLogout", app.handleSessionLogout)
+	mux.HandleFunc("/api/session", app.handleSession)
+	mux.HandleFunc("/api/reset-password", app.handleResetPassword)
+	mux.HandleFunc("/api/change-password", app.handleChangePassword)
+	mux.HandleFunc("/api/delete-account", app.handleDeleteAccount)
 
-	parts := strings.Split(meta, ",")
-	var plans []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			plans = append(plans, p)
-		}
-	}
-	return plans, nil
+	// Stripe Integration
+	mux.HandleFunc("/api/stripe-webhook", app.handleStripeWebhook)
+	mux.HandleFunc("/api/create-checkout-session", app.handleCreateCheckoutSession)
+	mux.HandleFunc("/api/create-customer-portal-session", app.handleCreateCustomerPortalSession)
+	mux.HandleFunc("/dashboard/", app.handleCheckoutSuccess)
+
+	// Content & Support
+	mux.HandleFunc("/api/contact-support", app.handleContactSupport)
+	mux.HandleFunc("/posts/", app.handleContentGuard)
+
+	port := getEnv("PORT", "8081")
+	log.Printf("Server starting on port %s for project %s", port, projectID)
+	log.Fatal(http.ListenAndServe(":"+port, mux))
 }
 
-func isAuthorized(userPlan string, required []string) bool {
-	if len(required) == 0 {
-		return true
+// --- Initialization Logic ---
+
+func initializeApp(ctx context.Context, projectID, bucket string) (*App, error) {
+	log.Printf("Initializing app for project: %s", projectID)
+
+	fbApp, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: projectID})
+	if err != nil {
+		return nil, fmt.Errorf("error initializing firebase app: %w", err)
 	}
 
-	hierarchy := map[string]int{
-		"visitor": 0,
-		"basic":   1,
-		"pro":     2,
-		"elite":   3,
+	authClient, err := fbApp.Auth(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error getting firebase auth client: %w", err)
 	}
 
-	userLevel := hierarchy[userPlan]
-	for _, r := range required {
-		if userLevel >= hierarchy[r] {
-			return true
-		}
-	}
-	return false
-}
-
-// --- HTTP Handlers ---
-
-func handleContentGuard(w http.ResponseWriter, r *http.Request) {
-	log.Printf("=== handleContentGuard START === Request: %s %s (from %s)", r.Method, r.URL.Path, r.RemoteAddr)
-
-	// 1. Determine user plan
-	user := getAuthenticatedUserFromCookie(r)
-	userPlan := "visitor"
-	if user != nil {
-		userPlan = user.Plan
-		log.Printf("Authenticated user: UID=%s Email=%s Plan=%s", user.UID, user.Email, userPlan)
+	var firestoreClient *firestore.Client
+	if host := os.Getenv("FIRESTORE_EMULATOR_HOST"); host != "" {
+		log.Printf("Using Firestore Emulator at: %s", host)
+		firestoreClient, err = firestore.NewClient(ctx, projectID, option.WithoutAuthentication())
 	} else {
-		log.Printf("No authenticated user → treating as visitor")
+		firestoreClient, err = fbApp.Firestore(ctx)
 	}
-
-	// 2. Build the GCS object path
-	objectPath := strings.TrimPrefix(r.URL.Path, "/")
-	log.Printf("Raw objectPath after TrimPrefix: %q", objectPath)
-
-	if !strings.Contains(path.Base(objectPath), ".") {
-		objectPath = path.Join(objectPath, "index.html")
-		log.Printf("No file extension detected → appending index.html → %q", objectPath)
-	}
-	log.Printf("Final GCS object key: %q", objectPath)
-
-	// 3. Check required plans metadata
-	requiredPlans, err := getRequiredPlans(r.Context(), objectPath)
 	if err != nil {
-		if err == storage.ErrObjectNotExist {
-			log.Printf("CONTENT NOT FOUND → Object %q does not exist in bucket %s (metadata check failed with ErrObjectNotExist)", objectPath, GCSBucket)
-		} else {
-			log.Printf("ERROR fetching metadata for %q: %v", objectPath, err)
+		return nil, fmt.Errorf("error getting firestore client: %w", err)
+	}
+
+	var storageClient *storage.Client
+	emulatorHost := os.Getenv("STORAGE_EMULATOR_HOST")
+	if emulatorHost == "" {
+		emulatorHost = os.Getenv("GCS_EMULATOR_HOST")
+	}
+
+	if emulatorHost != "" {
+		endpoint := fmt.Sprintf("%s/storage/v1/", strings.TrimSuffix(emulatorHost, "/"))
+		if !strings.HasPrefix(endpoint, "http") {
+			endpoint = "http://" + endpoint
 		}
-		http.Error(w, "Content not found", http.StatusNotFound)
-		return
+		log.Printf("Configuring GCS Client for emulator at: %s", endpoint)
+
+		currentProject := os.Getenv("GOOGLE_CLOUD_PROJECT")
+		os.Unsetenv("GOOGLE_CLOUD_PROJECT")
+		storageClient, err = storage.NewClient(ctx, option.WithEndpoint(endpoint), option.WithoutAuthentication())
+		if currentProject != "" {
+			os.Setenv("GOOGLE_CLOUD_PROJECT", currentProject)
+		}
+	} else {
+		log.Println("Using production GCS client")
+		storageClient, err = storage.NewClient(ctx)
 	}
-
-	log.Printf("Object %q exists → required-plans metadata: %v", objectPath, requiredPlans)
-
-	// 4. Authorization check
-	if !isAuthorized(userPlan, requiredPlans) {
-		log.Printf("ACCESS DENIED → User plan %q does not satisfy required plans %v", userPlan, requiredPlans)
-		w.Header().Set("Content-Type", "text/html")
-		w.WriteHeader(http.StatusForbidden)
-		fmt.Fprintf(w, `
-            <!DOCTYPE html>
-            <html><head><title>Access Denied</title></head>
-            <body>
-                <h1>Access Denied</h1>
-                <p>You need a higher plan to view this content.</p>
-                <a href="/posts">Go back to Posts</a>
-            </body>
-            </html>
-        `)
-		return
-	}
-
-	log.Printf("ACCESS GRANTED → User plan %q satisfies requirements", userPlan)
-
-	// 5. Fetch content from fake-gcs-server
-	encodedObject := url.PathEscape(objectPath)
-	emulatorURL := fmt.Sprintf(
-		"http://gcs-emulator:9000/storage/v1/b/%s/o/%s?alt=media",
-		GCSBucket,
-		encodedObject,
-	)
-	log.Printf("Fetching from emulator: %s", emulatorURL)
-
-	resp, err := http.Get(emulatorURL)
 	if err != nil {
-		log.Printf("ERROR reaching GCS emulator: %v", err)
-		http.Error(w, "Storage unreachable", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	log.Printf("Emulator response status: %d %s", resp.StatusCode, resp.Status)
-
-	if resp.StatusCode != http.StatusOK {
-		// Extra debug: read a bit of body in case of error response
-		bodyPreview := make([]byte, 512)
-		n, _ := resp.Body.Read(bodyPreview)
-		log.Printf("CONTENT NOT FOUND → Non-200 from emulator (body preview: %s)", string(bodyPreview[:n]))
-		http.Error(w, "Content not found", http.StatusNotFound)
-		return
+		return nil, fmt.Errorf("error getting storage client: %w", err)
 	}
 
-	log.Printf("Successfully retrieved object %q → serving to client (Content-Type: %s)", objectPath, resp.Header.Get("Content-Type"))
-
-	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-	io.Copy(w, resp.Body)
-
-	log.Printf("=== handleContentGuard END === Served %s successfully", r.URL.Path)
+	return &App{
+		auth:         authClient,
+		firestore:    firestoreClient,
+		storage:      storageClient,
+		projectID:    projectID,
+		bucket:       bucket,
+		domain:       getEnv("DOMAIN", "http://localhost:5000"),
+		emulatorHost: emulatorHost,
+	}, nil
 }
 
-// --- Permission Helpers ---
+// --- Stripe Webhook ---
 
-func hasPermission(userPlan, required string) bool {
-	hierarchy := map[string]int{"visitor": 0, "basic": 1, "pro": 2, "elite": 3}
-	return hierarchy[userPlan] >= hierarchy[required]
-}
-
-// --- HTTP Handlers ---
-
-// handleCreateCheckoutSession resolves the human-readable plan name to a Stripe Price ID via Lookup Keys.
-func handleCreateCheckoutSession(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		PlanName string `json:"planName"` // Frontend sends "basic_plan", "pro_plan", etc.
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
-		return
-	}
-
-	// 1. Resolve Lookup Key to actual Price ID
-	priceParams := &stripe.PriceListParams{}
-	priceParams.LookupKeys = []*string{stripe.String(req.PlanName)}
-	i := price.List(priceParams)
-
-	var targetPrice *stripe.Price
-	for i.Next() {
-		targetPrice = i.Price()
-	}
-
-	if targetPrice == nil {
-		log.Printf("Could not find Price for Lookup Key: %s", req.PlanName)
-		http.Error(w, "Invalid plan selected", http.StatusBadRequest)
-		return
-	}
-
-	// 2. Create Checkout Session using the retrieved ID
-	params := &stripe.CheckoutSessionParams{
-		Mode: stripe.String(string(stripe.CheckoutSessionModeSubscription)),
-		LineItems: []*stripe.CheckoutSessionLineItemParams{
-			{
-				Price:    stripe.String(targetPrice.ID),
-				Quantity: stripe.Int64(1),
-			},
-		},
-		BillingAddressCollection: stripe.String(string(stripe.CheckoutSessionBillingAddressCollectionRequired)),
-		SuccessURL:               stripe.String(Domain + "/dashboard?session_id={CHECKOUT_SESSION_ID}"),
-		CancelURL:                stripe.String(Domain + "/"),
-	}
-
-	s, err := checkoutsession.New(params)
-	if err != nil {
-		log.Printf("Checkout creation failed: %v", err)
-		http.Error(w, "Could not initiate checkout.", http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"sessionId": s.ID})
-}
-
-// handleStripeWebhook updates the database by expanding subscription data to see the Lookup Key.
-func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	payload, err := io.ReadAll(r.Body)
 	if err != nil {
+		log.Printf("Error reading webhook body: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	event, err := webhook.ConstructEventWithOptions(
-		payload,
-		r.Header.Get("Stripe-Signature"),
-		StripeWebhookSecret,
-		webhook.ConstructEventOptions{
-			IgnoreAPIVersionMismatch: true,
-		},
-	)
+	sig := r.Header.Get("Stripe-Signature")
+	event, err := webhook.ConstructEventWithOptions(payload, sig, os.Getenv("STRIPE_WEBHOOK_SECRET"), webhook.ConstructEventOptions{IgnoreAPIVersionMismatch: true})
 	if err != nil {
-		log.Printf("Webhook signature verification failed: %v", err)
+		log.Printf("Error verifying webhook signature: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+
+	// Prints all Webhook events like crazy
+	//log.Printf("Webhook received: %s [ID: %s]", event.Type, event.ID)
 
 	ctx := r.Context()
-
 	if event.Type == "checkout.session.completed" || event.Type == "customer.subscription.updated" {
 		var subID, customerID, customerEmail, customerName string
 
@@ -346,193 +189,166 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 			customerID = session.Customer.ID
 			customerEmail = session.CustomerDetails.Email
 			customerName = session.CustomerDetails.Name
+			log.Printf("Processing Checkout for: %s", customerEmail)
 		} else {
 			var sub stripe.Subscription
 			json.Unmarshal(event.Data.Raw, &sub)
 			subID = sub.ID
 			customerID = sub.Customer.ID
+			log.Printf("Processing Subscription Update for Customer: %s", customerID)
 		}
 
-		// 1. Fetch Subscription and EXPAND the Price object to see the Lookup Key
-		subParams := &stripe.SubscriptionParams{}
-		subParams.AddExpand("items.data.price")
-		fullSub, err := subscription.Get(subID, subParams)
+		params := &stripe.SubscriptionParams{}
+		params.AddExpand("items.data.price")
+		fullSub, err := subscription.Get(subID, params)
 		if err != nil {
-			log.Printf("Error retrieving/expanding subscription: %v", err)
+			log.Printf("Error retrieving subscription details from Stripe: %v", err)
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 
-		// 2. Identify Plan Level from the Lookup Key
-		lookupKey := fullSub.Items.Data[0].Price.LookupKey
 		regPlan := "basic"
-		switch lookupKey {
-		case PlanLookupPro:
-			regPlan = "pro"
-		case PlanLookupElite:
-			regPlan = "elite"
+		if len(fullSub.Items.Data) > 0 {
+			lookupKey := fullSub.Items.Data[0].Price.LookupKey
+			log.Printf("Stripe Price Lookup Key: %s", lookupKey)
+			switch lookupKey {
+			case "pro_plan":
+				regPlan = "pro"
+			case "elite_plan":
+				regPlan = "elite"
+			}
 		}
 
-		// 3. Sync to Firebase/Firestore
 		var uid string
 		if event.Type == "checkout.session.completed" {
-			userRecord, err := authClient.GetUserByEmail(ctx, customerEmail)
+			userRecord, err := a.auth.GetUserByEmail(ctx, customerEmail)
 			if err != nil {
-				tempPass, _ := generateTempPassword()
-				newUser, _ := authClient.CreateUser(ctx, (&auth.UserToCreate{}).
-					Email(customerEmail).Password(tempPass).DisplayName(customerName).EmailVerified(true))
-				uid = newUser.UID
-				link, _ := authClient.PasswordResetLink(ctx, customerEmail)
-				sendPasswordSetupEmail(customerEmail, link)
+				log.Printf("Creating new account for: %s", customerEmail)
+				temp, _ := generateTempPassword()
+				newUser, err := a.auth.CreateUser(ctx, (&auth.UserToCreate{}).Email(customerEmail).Password(temp).DisplayName(customerName).EmailVerified(true))
+				if err != nil {
+					log.Printf("Error creating firebase user: %v", err)
+				} else {
+					uid = newUser.UID
+					link, _ := a.auth.PasswordResetLink(ctx, customerEmail)
+					log.Printf("[EMAIL SIMULATION] To: %s | Subject: Welcome! Set your password | Link: %s", customerEmail, link)
+				}
 			} else {
 				uid = userRecord.UID
 			}
 		} else {
-			iter := firestoreClient.Collection("users").Where("stripeID", "==", customerID).Limit(1).Documents(ctx)
-			dsnap, err := iter.Next()
+			// Portal fix: Find by stripeID
+			iter := a.firestore.Collection("users").Where("stripeID", "==", customerID).Limit(1).Documents(ctx)
+			doc, err := iter.Next()
 			if err == nil {
-				uid = dsnap.Ref.ID
+				uid = doc.Ref.ID
+				log.Printf("Found user %s via StripeID: %s", uid, customerID)
+			} else {
+				log.Printf("Could not find user with stripeID: %s", customerID)
 			}
 		}
 
-		// 4. Update Firestore with conditional logic to prevent overwriting Name with empty strings
 		if uid != "" {
-			updateData := map[string]any{
+			update := map[string]any{
 				"plan":     regPlan,
 				"stripeID": customerID,
 			}
-
-			// Only add name/email to the update if they were actually in the webhook payload
 			if customerName != "" {
-				updateData["name"] = customerName
+				update["name"] = customerName
 			}
-			if customerEmail != "" {
-				updateData["email"] = customerEmail
-			}
-
-			// Add registration date only if it's the first time (checkout.session.completed)
 			if event.Type == "checkout.session.completed" {
-				updateData["registeredAt"] = time.Now()
+				update["registeredAt"] = time.Now()
 			}
 
-			// Use MergeAll to ensure we don't delete existing fields like 'registeredAt' on updates
-			_, err := firestoreClient.Collection("users").Doc(uid).Set(ctx, updateData, firestore.MergeAll)
+			_, err := a.firestore.Collection("users").Doc(uid).Set(ctx, update, firestore.MergeAll)
 			if err != nil {
-				log.Printf("Firestore update failed for user %s: %v", uid, err)
+				log.Printf("Error updating firestore for user %s: %v", uid, err)
 			} else {
-				log.Printf("Successfully updated user %s (Event: %s) to plan: %s", uid, event.Type, regPlan)
+				log.Printf("Firestore updated: User %s is now on %s plan", uid, regPlan)
 			}
 		}
-
 	}
-
 	w.WriteHeader(http.StatusOK)
 }
 
-func handleCreateCustomerPortalSession(w http.ResponseWriter, r *http.Request) {
-	user := getAuthenticatedUserFromCookie(r)
-	if user == nil || user.StripeID == "" {
-		http.Error(w, "Unauthorized", http.StatusForbidden)
-		return
+// --- Content Guard ---
+
+func (a *App) handleContentGuard(w http.ResponseWriter, r *http.Request) {
+	log.Printf("--- Access Request: %s ---", r.URL.Path)
+	ctx := r.Context()
+
+	// Authentication Start: The handler resolves the identity of the requester.
+	user := a.getAuthenticatedUserFromCookie(r)
+	userPlan := "visitor"
+	if user != nil {
+		userPlan = user.Plan
+		log.Printf("Authenticated User: %s [Plan: %s]", user.Email, userPlan)
 	}
 
-	params := &stripe.BillingPortalSessionParams{
-		Customer:  stripe.String(user.StripeID),
-		ReturnURL: stripe.String(Domain + "/dashboard"),
+	objectPath := strings.TrimPrefix(r.URL.Path, "/")
+	if !strings.Contains(path.Base(objectPath), ".") {
+		objectPath = path.Join(objectPath, "index.html")
 	}
-	s, err := portalsession.New(params)
+
+	// Metadata Fetch: The handler requests attributes from the GCS Emulator (:9000).
+	attrs, err := a.storage.Bucket(a.bucket).Object(objectPath).Attrs(ctx)
 	if err != nil {
-		http.Error(w, "Portal error", http.StatusInternalServerError)
-		return
-	}
-	json.NewEncoder(w).Encode(map[string]string{"url": s.URL})
-}
-
-func handleCheckoutSuccess(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.URL.Query().Get("session_id")
-	if sessionID == "" {
-		http.ServeFile(w, r, filepath.Join(StaticRoot, "dashboard", "index.html"))
+		log.Printf("GCS Metadata error for %s: %v", objectPath, err)
+		http.Error(w, "Content not found", http.StatusNotFound)
 		return
 	}
 
-	s, err := checkoutsession.Get(sessionID, nil)
-	if err != nil || s.PaymentStatus != stripe.CheckoutSessionPaymentStatusPaid {
-		http.Error(w, "Verification failed", http.StatusBadRequest)
-		return
-	}
-
-	userRecord, _ := authClient.GetUserByEmail(r.Context(), s.CustomerDetails.Email)
-	customToken, _ := authClient.CustomToken(r.Context(), userRecord.UID)
-	cookie, _ := authClient.SessionCookie(r.Context(), customToken, 24*5*time.Hour)
-
-	http.SetCookie(w, &http.Cookie{
-		Name: "__session", Value: cookie, MaxAge: 60 * 60 * 24 * 5, HttpOnly: true, Path: "/",
-	})
-	http.Redirect(w, r, "/dashboard", http.StatusFound)
-}
-
-func handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	user := getAuthenticatedUserFromCookie(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	// 1. Cancel Stripe Subscription if StripeID exists
-	if user.StripeID != "" {
-		iter := subscription.List(&stripe.SubscriptionListParams{
-			Customer: stripe.String(user.StripeID),
-			Status:   stripe.String("active"),
-		})
-		for iter.Next() {
-			subscription.Cancel(iter.Subscription().ID, nil)
+	// Requirements Retrieval: The GCS Emulator returns the object’s custom metadata.
+	meta := attrs.Metadata["required-plans"]
+	var required []string
+	if meta != "" {
+		for p := range strings.SplitSeq(meta, ",") {
+			required = append(required, strings.TrimSpace(p))
 		}
 	}
 
-	// 2. Delete User Data from Firestore
-	firestoreClient.Collection("users").Doc(user.UID).Delete(r.Context())
-
-	// 3. Delete User from Firebase Auth
-	err := authClient.DeleteUser(r.Context(), user.UID)
-	if err != nil {
-		log.Printf("Failed to delete auth user: %v", err)
+	// Authorization Logic: The handler compares the user’s plan level against the requirements.
+	if !isAuthorized(userPlan, required) {
+		log.Printf("ACCESS DENIED: User plan '%s' does not meet requirements: %v", userPlan, required)
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `<span class="red">Error deleting account. Please contact support.</span>`)
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprintf(w, "<html><body><h1>Access Denied</h1><p>This content requires a %v plan. Your current plan is: %s</p></body></html>", required, userPlan)
 		return
 	}
 
-	// 4. LOGOUT: Clear the session cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "__session",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-	})
+	log.Printf("ACCESS GRANTED: Serving %s", objectPath)
 
-	// 5. Return the Success Message + Redirect to Home
-	// This will be injected into the modal via HTMX
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `
-		<div class="pa3 bg-washed-red br2 mt3">
-			<p class="dark-red b mb1">Account Deleted</p>
-			<p class="f6 mb2">Your subscription has been cancelled and your account has been deleted.</p>
-			<p class="f7 gray i">Redirecting to home in 5 seconds...</p>
-		</div>
-		<script>
-			setTimeout(function() {
-				window.location.href = "/";
-			}, 5000);
-		</script>
-	`)
+	encoded := url.PathEscape(objectPath)
+	host := strings.TrimPrefix(strings.TrimPrefix(a.emulatorHost, "http://"), "https://")
+	emulatorURL := fmt.Sprintf("http://%s/storage/v1/b/%s/o/%s?alt=media", host, a.bucket, encoded)
+
+	// Media Request: The backend initiates an http.Get request with alt=media
+	resp, err := http.Get(emulatorURL)
+	if err != nil {
+		log.Printf("Error fetching media from emulator: %v", err)
+		http.Error(w, "Storage unreachable", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Emulator returned non-200 for media: %d", resp.StatusCode)
+		http.Error(w, "Content not found", http.StatusNotFound)
+		return
+	}
+
+	// Data Reception: The backend sets the headers for the incoming stream.
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+
+	// Direct Stream to Client: The backend pipes the data directly to the user’s browser.
+	io.Copy(w, resp.Body)
 }
 
-func handleResetPassword(w http.ResponseWriter, r *http.Request) {
+// --- Auth & Account Handlers ---
+
+func (a *App) handleResetPassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -549,18 +365,12 @@ func handleResetPassword(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `<span class="red">Please enter your email address.</span>`)
 		return
 	}
-
-	ctx := r.Context()
-
-	// Always attempt to send — but ignore errors related to user not found
-	link, err := authClient.PasswordResetLink(ctx, email)
+	log.Printf("Password reset requested for: %s", email)
+	link, err := a.auth.PasswordResetLink(r.Context(), email)
 	if err != nil {
-		// Log the error for debugging, but don't expose it to the user
-		log.Printf("Password reset link generation failed for %s: %v", email, err)
-		// Intentionally fall through to success message
+		log.Printf("Error generating reset link: %v", err)
 	} else {
-		log.Printf("Password reset link generated for: %s → %s", email, link)
-		sendPasswordSetupEmail(email, link) // Simulated in dev, real in prod
+		log.Printf("[EMAIL SIMULATION] To: %s | Subject: Password Reset | Link: %s", email, link)
 	}
 
 	// ALWAYS show the same neutral success message
@@ -574,15 +384,16 @@ func handleResetPassword(w http.ResponseWriter, r *http.Request) {
 	`)
 }
 
-func handleChangePassword(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	// 1. Identify user
-	user := getAuthenticatedUserFromCookie(r)
+	user := a.getAuthenticatedUserFromCookie(r)
 	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `<span class="red">Error: Session expired.</span>`)
 		return
@@ -598,10 +409,11 @@ func handleChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Update password in Firebase
 	// This action revokes all active session tokens on the Firebase side
-	params := (&auth.UserToUpdate{}).Password(newPassword)
-	_, err := authClient.UpdateUser(r.Context(), user.UID, params)
+	log.Printf("Changing password for user: %s", user.UID)
+	_, err := a.auth.UpdateUser(r.Context(), user.UID, (&auth.UserToUpdate{}).Password(newPassword))
 	if err != nil {
-		log.Printf("Password update error: %v", err)
+		log.Printf("Error updating password: %v", err)
+		http.Error(w, "Failed to update password", http.StatusInternalServerError)
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `<span class="red">Failed to update password.</span>`)
 		return
@@ -609,13 +421,7 @@ func handleChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	// 4. LOGOUT: Clear the local __session cookie
 	// We do this so the browser doesn't try to use an invalidated cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "__session",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1, // Tells browser to delete immediately
-		HttpOnly: true,
-	})
+	http.SetCookie(w, &http.Cookie{Name: "__session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
 
 	// 5. Return the HTML message + Redirect Script
 	// This will be injected into #password-feedback via HTMX
@@ -634,17 +440,72 @@ func handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	`)
 }
 
-func handleContactSupport(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	user := getAuthenticatedUserFromCookie(r)
+	user := a.getAuthenticatedUserFromCookie(r)
 	if user == nil {
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `<span class="red">Error: Session expired.</span>`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
+	}
+
+	log.Printf("DELETING ACCOUNT: %s", user.UID)
+	ctx := r.Context()
+
+	// 1. Cancel Stripe Subscription if StripeID exists
+	if user.StripeID != "" {
+		log.Printf("Canceling Stripe subscriptions for: %s", user.StripeID)
+		i := subscription.List(&stripe.SubscriptionListParams{Customer: stripe.String(user.StripeID), Status: stripe.String("active")})
+		for i.Next() {
+			subscription.Cancel(i.Subscription().ID, nil)
+		}
+	}
+
+	// 2. Delete User Data from Firestore
+	a.firestore.Collection("users").Doc(user.UID).Delete(ctx)
+
+	// 3. Delete User from Firebase Auth
+	err := a.auth.DeleteUser(ctx, user.UID)
+	if err != nil {
+		log.Printf("Failed to delete auth user: %v", err)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<span class="red">Error deleting account. Please contact support.</span>`)
+		return
+	}
+
+	// 4. LOGOUT: Clear the session cookie
+	http.SetCookie(w, &http.Cookie{Name: "__session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
+
+	// 5. Return the Success Message + Redirect to Home
+	// This will be injected into the modal via HTMX
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `
+		<div class="pa3 bg-washed-red br2 mt3">
+			<p class="dark-red b mb1">Account Deleted</p>
+			<p class="f6 mb2">Your subscription has been cancelled and your account has been deleted.</p>
+			<p class="f7 gray i">Redirecting to home in 5 seconds...</p>
+		</div>
+		<script>
+			setTimeout(function() {
+				window.location.href = "/";
+			}, 5000);
+		</script>
+	`)
+}
+
+func (a *App) handleContactSupport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	user := a.getAuthenticatedUserFromCookie(r)
+	email := "anonymous"
+	if user != nil {
+		email = user.Email
 	}
 
 	if err := r.ParseForm(); err != nil {
@@ -654,58 +515,30 @@ func handleContactSupport(w http.ResponseWriter, r *http.Request) {
 
 	subject := r.FormValue("subject")
 	message := r.FormValue("message")
-
-	// SIMULATION: In production, you would use SendGrid or an email service here.
-	log.Printf("SUPPORT TICKET RECEIVED:\nFrom: %s (%s)\nSubject: %s\nMessage: %s",
-		user.Name, user.Email, subject, message)
-
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `<span class="dark-green">Message sent successfully! Our team will contact you.</span>`)
+	log.Printf("SUPPORT TICKET | From: %s | Subject: %s | Message: %s", email, subject, message)
+	fmt.Fprintf(w, "<span>Your message has been sent!</span>")
 }
 
-func handleSessionLogout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: "__session", Value: "", MaxAge: -1, Path: "/"})
-	w.WriteHeader(http.StatusOK)
-}
+// --- Session Logic ---
 
-func handleSessionLogin(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		IDToken string `json:"idToken"`
-	}
-	json.NewDecoder(r.Body).Decode(&req)
-	cookie, _ := authClient.SessionCookie(r.Context(), req.IDToken, 24*5*time.Hour)
-	http.SetCookie(w, &http.Cookie{Name: "__session", Value: cookie, MaxAge: 60 * 60 * 24 * 5, HttpOnly: true, Path: "/"})
-	w.WriteHeader(http.StatusOK)
-}
-
-func handleSession(w http.ResponseWriter, r *http.Request) {
-	user := getAuthenticatedUserFromCookie(r)
-	if user != nil {
-		json.NewEncoder(w).Encode(map[string]any{
-			"loggedIn": true, "plan": user.Plan, "email": user.Email, "name": user.Name,
-			"registeredAt": user.RegisteredAt.Format("Jan 2, 2006"),
-			"nextRenewal":  user.NextRenewal.Format("Jan 2, 2006"),
-		})
-		return
-	}
-	json.NewEncoder(w).Encode(map[string]any{"loggedIn": false, "plan": "visitor"})
-}
-
-func getAuthenticatedUserFromCookie(r *http.Request) *AuthUser {
+func (a *App) getAuthenticatedUserFromCookie(r *http.Request) *AuthUser {
 	cookie, err := r.Cookie("__session")
 	if err != nil {
 		return nil
 	}
 
-	token, err := authClient.VerifySessionCookie(r.Context(), cookie.Value)
+	// SDK Invocation: The helper calls the Firebase SDK to verify the cookie.
+	token, err := a.auth.VerifySessionCookie(r.Context(), cookie.Value)
 	if err != nil {
+		log.Printf("Session verification failed: %v", err)
 		return nil
 	}
 
 	userPlan, userName, stripeID := "basic", "", ""
 	var registeredAt time.Time
 
-	dsnap, err := firestoreClient.Collection("users").Doc(token.UID).Get(r.Context())
+	// Database Request: The helper initiates a Firestore lookup.
+	dsnap, err := a.firestore.Collection("users").Doc(token.UID).Get(r.Context())
 	if err == nil {
 		data := dsnap.Data()
 		userPlan, _ = data["plan"].(string)
@@ -716,7 +549,11 @@ func getAuthenticatedUserFromCookie(r *http.Request) *AuthUser {
 
 	var nextRenewal time.Time
 	if stripeID != "" {
-		i := subscription.List(&stripe.SubscriptionListParams{Customer: stripe.String(stripeID), Status: stripe.String("active"), Expand: []*string{stripe.String("data.items")}})
+		i := subscription.List(&stripe.SubscriptionListParams{
+			Customer: stripe.String(stripeID),
+			Status:   stripe.String("active"),
+			Expand:   []*string{stripe.String("data.items")},
+		})
 		if i.Next() {
 			s := i.Subscription()
 			if len(s.Items.Data) > 0 {
@@ -725,81 +562,160 @@ func getAuthenticatedUserFromCookie(r *http.Request) *AuthUser {
 		}
 	}
 
-	return &AuthUser{UID: token.UID, Email: token.Claims["email"].(string), Plan: userPlan, Name: userName, RegisteredAt: registeredAt, NextRenewal: nextRenewal, StripeID: stripeID}
+	// Return User Profile: The helper returns the full AuthUser struct.
+	return &AuthUser{
+		UID:          token.UID,
+		Email:        token.Claims["email"].(string),
+		Plan:         userPlan,
+		Name:         userName,
+		RegisteredAt: registeredAt,
+		NextRenewal:  nextRenewal,
+		StripeID:     stripeID,
+	}
 }
 
-func main() {
-	ctx := context.Background()
-
-	// 1. Firebase App still uses your specific project ID for Auth/Firestore
-	app, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: "my-test-project"})
+func (a *App) handleSessionLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDToken string `json:"idToken"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Login decode error: %v", err)
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	cookie, err := a.auth.SessionCookie(r.Context(), req.IDToken, 24*5*time.Hour)
 	if err != nil {
-		log.Fatalf("Error initializing Firebase app: %v", err)
+		log.Printf("Error creating session cookie: %v", err)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: "__session", Value: cookie, MaxAge: 60 * 60 * 24 * 5, HttpOnly: true, Path: "/"})
+	w.WriteHeader(http.StatusOK)
+}
+
+func (a *App) handleSessionLogout(w http.ResponseWriter, r *http.Request) {
+	log.Println("User logging out")
+	http.SetCookie(w, &http.Cookie{Name: "__session", Value: "", MaxAge: -1, Path: "/"})
+	w.WriteHeader(http.StatusOK)
+}
+
+func (a *App) handleSession(w http.ResponseWriter, r *http.Request) {
+	user := a.getAuthenticatedUserFromCookie(r)
+	if user != nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"loggedIn":     true,
+			"plan":         user.Plan,
+			"email":        user.Email,
+			"name":         user.Name,
+			"registeredAt": user.RegisteredAt.Format("Jan 2, 2006"),
+			"nextRenewal":  user.NextRenewal.Format("Jan 2, 2006"),
+		})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{"loggedIn": false, "plan": "visitor"})
+}
+
+// --- Stripe Logic ---
+
+func (a *App) handleCreateCheckoutSession(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PlanName string `json:"planName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", 400)
+		return
 	}
 
-	authClient, _ = app.Auth(ctx)
-	firestoreClient, _ = app.Firestore(ctx)
-
-	// 2. Configure GCS Client
-	gcsOpts := []option.ClientOption{}
-	emulatorHost := os.Getenv("STORAGE_EMULATOR_HOST")
-	if emulatorHost == "" {
-		emulatorHost = os.Getenv("GCS_EMULATOR_HOST")
+	priceParams := &stripe.PriceListParams{}
+	priceParams.LookupKeys = []*string{stripe.String(req.PlanName)}
+	i := price.List(priceParams)
+	var targetPrice *stripe.Price
+	if i.Next() {
+		targetPrice = i.Price()
 	}
 
-	if emulatorHost != "" {
-		// The storage library needs the full /storage/v1/ endpoint for custom endpoints
-		endpoint := fmt.Sprintf("%s/storage/v1/", strings.TrimSuffix(emulatorHost, "/"))
-		if !strings.HasPrefix(endpoint, "http") {
-			endpoint = "http://" + endpoint
-		}
-
-		gcsOpts = append(gcsOpts, option.WithEndpoint(endpoint), option.WithoutAuthentication())
-
-		// --- CRITICAL REFACTOR ---
-		// We temporarily unset the project env var so the Storage Client doesn't
-		// try to filter requests by "my-test-project", which the emulator ignores.
-		currentProject := os.Getenv("GOOGLE_CLOUD_PROJECT")
-		os.Unsetenv("GOOGLE_CLOUD_PROJECT")
-
-		var err error
-		gcsClient, err = storage.NewClient(ctx, gcsOpts...)
-
-		// Restore the variable so other Firebase services aren't affected
-		if currentProject != "" {
-			os.Setenv("GOOGLE_CLOUD_PROJECT", currentProject)
-		}
-
-		if err != nil {
-			log.Fatalf("Failed to create GCS client for emulator: %v", err)
-		}
-		log.Printf("GCS Client configured for emulator at: %s (Project ID strictness disabled)", endpoint)
-	} else {
-		// Production GCS Client
-		var err error
-		gcsClient, err = storage.NewClient(ctx, gcsOpts...)
-		if err != nil {
-			log.Fatalf("Failed to create GCS client: %v", err)
-		}
+	if targetPrice == nil {
+		log.Printf("Could not find Stripe price for lookup key: %s", req.PlanName)
+		http.Error(w, "Invalid plan", 400)
+		return
 	}
 
-	// 3. Remaining Setup
-	stripe.Key = StripeSecretKey
+	log.Printf("Creating checkout session for plan: %s", req.PlanName)
+	params := &stripe.CheckoutSessionParams{
+		Mode:       stripe.String(string(stripe.CheckoutSessionModeSubscription)),
+		LineItems:  []*stripe.CheckoutSessionLineItemParams{{Price: stripe.String(targetPrice.ID), Quantity: stripe.Int64(1)}},
+		SuccessURL: stripe.String(a.domain + "/dashboard?session_id={CHECKOUT_SESSION_ID}"),
+		CancelURL:  stripe.String(a.domain + "/"),
+	}
+	s, err := checkoutsession.New(params)
+	if err != nil {
+		log.Printf("Error creating Stripe session: %v", err)
+		http.Error(w, "Internal error", 500)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"sessionId": s.ID})
+}
 
-	http.HandleFunc("/posts/", handleContentGuard)
-	http.HandleFunc("/api/create-checkout-session", handleCreateCheckoutSession)
-	http.HandleFunc("/api/stripe-webhook", handleStripeWebhook)
-	http.HandleFunc("/dashboard/", handleCheckoutSuccess)
-	http.HandleFunc("/api/delete-account", handleDeleteAccount)
-	http.HandleFunc("/api/reset-password", handleResetPassword)
-	http.HandleFunc("/api/change-password", handleChangePassword)
-	http.HandleFunc("/api/contact-support", handleContactSupport)
-	http.HandleFunc("/api/create-customer-portal-session", handleCreateCustomerPortalSession)
-	http.HandleFunc("/api/sessionLogout", handleSessionLogout)
-	http.HandleFunc("/api/sessionLogin", handleSessionLogin)
-	http.HandleFunc("/api/session", handleSession)
+func (a *App) handleCreateCustomerPortalSession(w http.ResponseWriter, r *http.Request) {
+	user := a.getAuthenticatedUserFromCookie(r)
+	if user == nil || user.StripeID == "" {
+		http.Error(w, "No subscription found", 400)
+		return
+	}
+	log.Printf("Creating portal session for customer: %s", user.StripeID)
+	params := &stripe.BillingPortalSessionParams{Customer: stripe.String(user.StripeID), ReturnURL: stripe.String(a.domain + "/dashboard")}
+	s, err := portalsession.New(params)
+	if err != nil {
+		log.Printf("Portal session error: %v", err)
+		http.Error(w, "Internal error", 500)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"url": s.URL})
+}
 
-	port := getEnv("PORT", "8081")
-	log.Printf("Server starting on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+func (a *App) handleCheckoutSuccess(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		http.ServeFile(w, r, filepath.Join(getEnv("STATIC_ROOT", "public"), "dashboard", "index.html"))
+		return
+	}
+	log.Printf("Checkout success, processing session: %s", sessionID)
+	s, _ := checkoutsession.Get(sessionID, nil)
+	userRecord, _ := a.auth.GetUserByEmail(r.Context(), s.CustomerDetails.Email)
+	token, _ := a.auth.CustomToken(r.Context(), userRecord.UID)
+	cookie, _ := a.auth.SessionCookie(r.Context(), token, 24*5*time.Hour)
+	http.SetCookie(w, &http.Cookie{Name: "__session", Value: cookie, MaxAge: 60 * 60 * 24 * 5, HttpOnly: true, Path: "/"})
+	http.Redirect(w, r, "/dashboard", http.StatusFound)
+}
+
+// --- Helpers ---
+
+func isAuthorized(userPlan string, required []string) bool {
+	if len(required) == 0 {
+		return true
+	}
+	hierarchy := map[string]int{"visitor": 0, "basic": 1, "pro": 2, "elite": 3}
+	for _, r := range required {
+		if hierarchy[userPlan] >= hierarchy[r] {
+			return true
+		}
+	}
+	return false
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func generateTempPassword() (string, error) {
+	const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	res := make([]byte, 12)
+	for i := range res {
+		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(c))))
+		res[i] = c[n.Int64()]
+	}
+	return string(res), nil
 }
