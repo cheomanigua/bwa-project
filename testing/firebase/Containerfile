@@ -2,7 +2,7 @@
 FROM node:20-alpine
 
 # Install Java Runtime Environment (JRE) required for Firebase Emulators
-RUN apk add --no-cache openjdk17-jre
+RUN apk add --no-cache openjdk17-jre bash
 
 # Install the Firebase CLI globally
 # We use a specific version for stability (latest major is 13.x at time of writing)
@@ -12,17 +12,16 @@ RUN npm install -g firebase-tools@14.26.0
 # Set the working directory
 WORKDIR /app
 
-# The default user in node:alpine is 'node' (UID 1000). 
-# We'll stick to it for non-root security.
+# Switch to non-root user for security
+USER node
 
 # Expose ports (matching your compose file)
 EXPOSE 4000 8080 9099
 
 # Copy necessary files from the host into the container. 
-# These will be overwritten by volumes in compose.dev.yaml, 
-# but are included here for robustness.
-COPY firebase.json firestore.rules firestore.indexes.json ./
+# Note: In Docker, ensure these files exist in the same folder as the Containerfile
+COPY --chown=node:node firebase.json firestore.rules firestore.indexes.json ./
 
 # Define the entry point to run the emulators
-ENTRYPOINT ["/usr/local/bin/firebase"]
+ENTRYPOINT ["firebase"]
 CMD ["emulators:start", "--project=my-test-project", "--only=auth,firestore"]

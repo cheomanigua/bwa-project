@@ -1,4 +1,16 @@
 cd frontend
 hugo -D --minify
 cd ..
-podman compose up -d
+
+chmod 644 ./reverse-proxy/Caddyfile
+mkdir -p .firebase_data
+sudo chown -R 1000:1000 ./firebase ./.firebase_data ./reverse-proxy
+
+if [ -f /sys/fs/selinux/enforce ]; then
+    echo "SELinux detected: Applying security labels..."
+    sudo chcon -Rt svirt_sandbox_file_t .
+else
+    echo "SELinux not active: Skipping labels (Normal for Debian)."
+fi
+
+docker compose up -d

@@ -39,7 +39,7 @@
         header Access-Control-Allow-Origin "*"
         header Access-Control-Allow-Methods "GET, OPTIONS"
         header Access-Control-Allow-Headers "*"
-        root * /srv
+        root * /usr/share/caddy
         file_server
     }
 
@@ -59,7 +59,7 @@
         # Proxy to the GCS emulator
         reverse_proxy gcs-emulator:9000 {
           # Add the host header to match the GCS emulator's expectation
-          header_up Host localhost:9000
+          header_up Host {upstream_hostport}
         }
 
     }
@@ -85,7 +85,7 @@
     ###########################################################
 
     handle {
-        root * /srv
+        root * /usr/share/caddy
         try_files {path} {path}/ /index.html
         file_server
     }

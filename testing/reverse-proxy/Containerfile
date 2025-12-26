@@ -34,12 +34,12 @@ RUN apk add --no-cache \
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 
 # Default config and working dir
-WORKDIR /etc/caddy
+WORKDIR /srv
 VOLUME ["/etc/caddy", "/srv"]
 
 # Expose the port
 EXPOSE 5000
 
 # Run Caddy
-CMD ["/usr/bin/caddy", "run", "--config", "/etc/caddy/Caddyfile"]
+CMD ["/usr/bin/caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
 

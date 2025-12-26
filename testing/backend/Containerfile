@@ -21,7 +21,7 @@ RUN go mod download
 COPY main.go .
 
 # Build the application with -ldflags="-s -w" to strip debug info and symbols, reducing binary size
-RUN go build -ldflags="-s -w" -o /go-server .
+RUN go build -ldflags="-s -w" -o /app/go-server .
 
 # --- Final image (minimal base for production/Cloud Run) ---
 FROM alpine:latest
@@ -35,10 +35,10 @@ WORKDIR /app
 EXPOSE 8081
 
 # Copy the compiled binary from the builder stage
-COPY --from=builder /go-server .
+COPY --from=builder /app/go-server .
 
 # Create necessary directories that will be used for volume mounts in dev or bundled in prod
 RUN mkdir -p /public /app/posts
 
 # Define the default command to run your app
-CMD ["/app/go-server"]
+CMD ["./go-server"]

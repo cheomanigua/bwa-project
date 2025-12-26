@@ -457,7 +457,7 @@ func (a *App) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 
 	// 1. Cancel Stripe Subscription if StripeID exists
 	if user.StripeID != "" {
-		log.Printf("Canceling Stripe subscriptions for: %s", user.StripeID)
+		log.Printf("Canceling Stripe subscriptions for Stripe customer: %s", user.StripeID)
 		i := subscription.List(&stripe.SubscriptionListParams{Customer: stripe.String(user.StripeID), Status: stripe.String("active")})
 		for i.Next() {
 			subscription.Cancel(i.Subscription().ID, nil)
@@ -478,6 +478,8 @@ func (a *App) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 
 	// 4. LOGOUT: Clear the session cookie
 	http.SetCookie(w, &http.Cookie{Name: "__session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
+
+	log.Printf("DELETED ACCOUNT:  %s, Email: %s", user.UID, user.Email)
 
 	// 5. Return the Success Message + Redirect to Home
 	// This will be injected into the modal via HTMX

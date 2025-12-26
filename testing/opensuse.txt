@@ -1,0 +1,11 @@
+# See the most recent security blocks:
+sudo ausearch -m avc -ts recent
+
+# Reset the security context specifically for the Caddyfile
+sudo restorecon -v ./reverse-proxy/Caddyfile
+
+If gives error:
+
+# Add the 'svirt_sandbox_file_t' label specifically to the config file
+sudo chcon -u system_u -r object_r -t svirt_sandbox_file_t ./reverse-proxy/Caddyfile
+sudo restorecon -v ./reverse-proxy/Caddyfile

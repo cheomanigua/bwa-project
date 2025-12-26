@@ -1,0 +1,91 @@
+services:
+  firebase:
+    build:
+      context: ./firebase
+      dockerfile: Containerfile
+    container_name: firebase
+    image: localhost/firebase-emulator:latest
+    # Run as the owner of the files to satisfy Node.js permissions
+    user: "1000:1000"
+    working_dir: /app
+    environment:
+      - FIREBASE_LOGS_PATH=/home/node/firebase-debug.log
+    security_opt:
+      - label:disable
+    ports:
+      - "4000:4000"
+      - "8080:8080"
+      - "9099:9099"
+    volumes:
+      - ./.firebase_data:/home/node/.cache/firebase/emulators:Z
+      - ./firebase:/app:Z
+    networks:
+      - custom_app_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Containerfile
+    container_name: go-backend
+    image: localhost/go-api:latest
+    ports:
+      - "8081:8081"
+    environment:
+      - FIREBASE_AUTH_EMULATOR_HOST=firebase:9099
+      - FIRESTORE_EMULATOR_HOST=firebase:8080
+      - STORAGE_EMULATOR_HOST=http://gcs-emulator:9000
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+    networks:
+      - custom_app_network
+
+  gcs-emulator:
+    image: fsouza/fake-gcs-server:latest
+    container_name: gcs-emulator
+    ports:
+      - "9000:9000"
+    command:
+      - "-scheme"
+      - "http"
+      - "-port"
+      - "9000"
+      - "-public-host"
+      - "gcs-emulator:9000"
+      - "-external-url"
+      - "http://gcs-emulator:9000"
+    networks:
+      - custom_app_network
+
+  caddy-server:
+    build:
+      context: ./reverse-proxy
+      dockerfile: Containerfile
+    container_name: caddy-server
+    image: localhost/caddy-proxy:latest
+    # Run as root to override the "Permission Denied" on the Caddyfile mount
+    user: "0:0"
+    security_opt:
+      - label:disable
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./frontend/public:/usr/share/caddy:ro,Z
+      - ./reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro,Z
+    networks:
+      - custom_app_network
+
+  content-uploader:
+    image: google/cloud-sdk:slim
+    container_name: content-uploader
+    volumes:
+      - .:/app:Z
+    working_dir: /app
+    depends_on:
+      - gcs-emulator
+    command: bash -c "chmod +x ./upload_posts.sh && ./upload_posts.sh"
+    networks:
+      - custom_app_network
+
+networks:
+  custom_app_network:
+    driver: bridge
