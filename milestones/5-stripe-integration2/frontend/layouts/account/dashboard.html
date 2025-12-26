@@ -1,0 +1,296 @@
+{{ define "main" }}
+<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+
+<section class="dashboard-section">
+  <h1 class="tc mb3">{{ .Title }}</h1>
+
+  <div class="dashboard-card">
+    <h2 class="f4 b mb2">Account Information</h2>
+    <ul class="dashboard-info">
+      <li><strong>Name:</strong> <span id="user-name">Loading...</span></li>
+      <li><strong>Email:</strong> <span id="user-email">Loading...</span></li>
+      <li>
+        <strong>Current Plan:</strong> <span id="user-plan">Loading...</span>
+      </li>
+      <li>
+        <strong>Subscription Created:</strong>
+        <span id="user-created">Loading...</span>
+      </li>
+      <li>
+        <strong>Next Renewal:</strong>
+        <span id="user-next-renewal">Loading...</span>
+      </li>
+    </ul>
+  </div>
+
+  <div class="dashboard-actions">
+    <h2 class="f4 b mb2">Manage Subscription</h2>
+    <p class="mb2">
+      Change subscription, update form of paymend or view billing history via Stripe.
+    </p>
+    <div class="btn-group">
+      <button
+        class="grow bg-blue white pa3 br2 bn pointer"
+        onclick="openCustomerPortal()"
+      >
+        Manage Subscription & Billing
+      </button>
+    </div>
+  </div>
+
+  <div class="dashboard-actions">
+    <h2 class="f4 b mb2">Account Settings</h2>
+    <div class="btn-group">
+      <button
+        class="grow bg-dark-red white pa3 br2 bn pointer"
+        onclick="openModal('delete')"
+      >
+        Delete Account
+      </button>
+      <button
+        class="grow bg-orange white pa3 br2 bn pointer"
+        onclick="openModal('password')"
+      >
+        Change Password
+      </button>
+      <button
+        class="grow bg-gray white pa3 br2 bn pointer"
+        onclick="openModal('support')"
+      >
+        Contact Support
+      </button>
+    </div>
+  </div>
+</section>
+
+<div
+  id="modal-overlay"
+  class="dn fixed absolute--fill flex items-center justify-center z-999"
+  style="
+    background-color: rgba(0, 0, 0, 0.8);
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: none;
+  "
+>
+  <div class="bg-white pa4 br2 w-90 mw7 center shadow-5 relative">
+    <button
+      class="absolute top-0 right-1 f3 pointer bn bg-transparent pa2"
+      onclick="closeModal()"
+    >
+      &times;
+    </button>
+
+    <div id="modal-content-delete" class="dn">
+      <h3 class="dark-red">Delete Account</h3>
+      <div id="delete-area">
+        <p class="lh-copy">
+          Are you sure? This action is permanent and will cancel your
+          subscription and delete your account immediately.
+        </p>
+        <div class="flex mt3">
+          <button
+            class="ph3 pv2 bg-dark-red white bn br2 grow pointer mr2"
+            hx-post="/api/delete-account"
+            hx-target="#delete-area"
+          >
+            Confirm Delete
+          </button>
+          <button
+            class="ph3 pv2 bg-gray white bn br2 grow pointer"
+            onclick="closeModal()"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-content-password" class="dn">
+      <h3>Change Password</h3>
+      <p>
+        You will be logged out when changing the password. In order to log in
+        again, you must enter your new password.
+      </p>
+      <form
+        id="password-form"
+        hx-post="/api/change-password"
+        hx-target="#password-feedback"
+      >
+        <div class="mb3">
+          <label class="db fw6 lh-copy f6">New Password</label>
+          <input
+            class="pa2 input-reset ba w-100"
+            type="password"
+            name="newPassword"
+            id="new-password"
+            required
+            minlength="6"
+          />
+        </div>
+        <div class="mb3">
+          <label class="db fw6 lh-copy f6">Confirm New Password</label>
+          <input
+            class="pa2 input-reset ba w-100"
+            type="password"
+            id="confirm-password"
+            required
+            minlength="6"
+          />
+        </div>
+        <div class="flex">
+          <button
+            class="ph3 pv2 bg-orange white bn br2 grow pointer mr2"
+            type="submit"
+          >
+            Save Changes
+          </button>
+          <button
+            class="ph3 pv2 bg-gray white bn br2 grow pointer"
+            type="button"
+            onclick="closeModal()"
+          >
+            Cancel
+          </button>
+        </div>
+        <div id="password-feedback" class="mt2 f6"></div>
+      </form>
+    </div>
+
+    <div id="modal-content-support" class="dn">
+      <h3>Contact Support</h3>
+      <form
+        id="support-form"
+        hx-post="/api/contact-support"
+        hx-target="#support-feedback"
+        hx-on::after-request="if(event.detail.successful) { setTimeout(() => { closeModal(); }, 2000); }"
+      >
+        <div class="mb3">
+          <label class="db fw6 lh-copy f6">Subject</label>
+          <input
+            class="pa2 input-reset ba w-100"
+            type="text"
+            name="subject"
+            required
+            placeholder="How can we help?"
+          />
+        </div>
+        <div class="mb3">
+          <label class="db fw6 lh-copy f6">Message</label>
+          <textarea
+            class="pa2 input-reset ba w-100 h3"
+            name="message"
+            required
+            placeholder="Describe your issue..."
+          ></textarea>
+        </div>
+        <div class="flex">
+          <button
+            class="ph3 pv2 bg-blue white bn br2 grow pointer mr2"
+            type="submit"
+          >
+            Send
+          </button>
+          <button
+            class="ph3 pv2 bg-gray white bn br2 grow pointer"
+            type="button"
+            onclick="closeModal()"
+          >
+            Cancel
+          </button>
+        </div>
+        <div id="support-feedback" class="mt2 f6"></div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+  const capitalize = (s) => s && s[0].toUpperCase() + s.slice(1).toLowerCase();
+  function openModal(type) {
+    const overlay = document.getElementById("modal-overlay");
+    //
+    // 1. Reset the form fields (Subject/Message) and feedback
+    document.getElementById("support-feedback").innerHTML = "";
+    document.getElementById("password-feedback").innerHTML = "";
+    document.getElementById("support-form").reset();
+    document.getElementById("password-form").reset();
+
+    // 2. Hide ALL modal content containers first
+    document.getElementById("modal-content-delete").classList.add("dn");
+    document.getElementById("modal-content-password").classList.add("dn");
+    document.getElementById("modal-content-support").classList.add("dn");
+
+    // 3. Show the specific content requested
+    const targetContent = document.getElementById(`modal-content-${type}`);
+    if (targetContent) {
+      targetContent.classList.remove("dn");
+    }
+
+    // 4. Finally, reveal the overlay by removing 'dn' and setting flex
+    overlay.classList.remove("dn");
+    overlay.style.setProperty("display", "flex", "important");
+
+    if (type === "delete")
+      document.getElementById("modal-content-delete").classList.remove("dn");
+    if (type === "password")
+      document.getElementById("modal-content-password").classList.remove("dn");
+    if (type === "support")
+      document.getElementById("modal-content-support").classList.remove("dn");
+  }
+
+  function closeModal() {
+    const overlay = document.getElementById("modal-overlay");
+    overlay.style.display = "none";
+    overlay.classList.add("dn");
+  }
+
+  document.body.addEventListener("htmx:configRequest", function (evt) {
+    if (evt.detail.elt.id === "password-form") {
+      const p1 = document.getElementById("new-password").value;
+      const p2 = document.getElementById("confirm-password").value;
+      const fb = document.getElementById("password-feedback");
+
+      if (p1 !== p2) {
+        evt.preventDefault();
+        fb.innerHTML =
+          '<span style="color: red;">Passwords do not match.</span>';
+      }
+    }
+  });
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    try {
+      const response = await fetch("/api/session");
+      const userData = await response.json();
+      if (userData.loggedIn) {
+        document.getElementById("user-name").textContent =
+          userData.name || "N/A";
+        document.getElementById("user-email").textContent =
+          userData.email || "N/A";
+        document.getElementById("user-plan").textContent = userData.plan
+          ? capitalize(userData.plan)
+          : "N/A";
+        document.getElementById("user-created").textContent =
+          userData.registeredAt || "N/A";
+        document.getElementById("user-next-renewal").textContent =
+          userData.nextRenewal || "N/A";
+      } else {
+        window.location.href = "/login";
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  });
+
+  async function openCustomerPortal() {
+    const response = await fetch("/api/create-customer-portal-session", {
+      method: "POST",
+    });
+    const data = await response.json();
+    if (data.url) window.location.href = data.url;
+  }
+</script>
+{{ end }}

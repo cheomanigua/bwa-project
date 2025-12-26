@@ -1,0 +1,4 @@
+cd frontend
+hugo -D --minify
+cd ..
+podman compose up -d

@@ -1,0 +1,48 @@
+<footer class="site-footer mt5">
+  <div class="footer-container">
+    <div class="footer-section">
+      <h3 class="f4 b white mb3">{{ .Site.Title }}</h3>
+      <p class="f6 silver lh-copy">
+        Premium gated content and exclusive projects for our members.
+      </p>
+      <p class="f6 silver lh-copy">
+        All prices shown in euros (€)
+      <img src="https://flagcdn.com/w20/eu.webp" alt="European Union flag">
+      </p>
+    </div>
+
+    <div class="footer-section">
+      <h4 class="f5 b white mb3">Navigation</h4>
+      <ul class="footer-links">
+        <li><a href="{{ "/" | absURL }}">Home</a></li>
+        <li><a href="{{ "/posts" | absURL }}">Posts</a></li>
+        <li><a href="{{ "/#pricing" | absURL }}">Pricing</a></li>
+      </ul>
+    </div>
+
+    <div class="footer-section">
+      <h4 class="f5 b white mb3">Account</h4>
+      <ul class="footer-links">
+        <li class="visitor-menu"><a href="{{ "/login" | absURL }}">Login</a></li>
+        <li class="visitor-menu"><a href="{{ "/register" | absURL }}">Sign Up</a></li>
+        <li class="member-menu"><a href="{{ "/dashboard" | absURL }}">Dashboard</a></li>
+        <li class="member-menu"><a href="#" id="logout-button">Logout</a></li>
+      </ul>
+    </div>
+
+    <div class="footer-section">
+      <h4 class="f5 b white mb3">Legal</h4>
+      <ul class="footer-links">
+        <li><a href="{{ "/privacy-policy" | absURL }}">Privacy Policy</a></li>
+        <li><a href="{{ "/terms" | absURL }}">Terms of Service</a></li>
+        <li><a href="{{ "/refund-policy" | absURL }}">Refund Policy</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="footer-bottom tc pv4">
+    <p class="f7 silver">
+      &copy; {{ now.Year }} {{ .Site.Title }}. All rights reserved.
+    </p>
+  </div>
+</footer>

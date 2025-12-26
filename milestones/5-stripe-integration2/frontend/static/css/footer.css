@@ -1,0 +1,61 @@
+/* ----------------------------- */
+/* Footer Styles                 */
+/* ----------------------------- */
+
+.site-footer {
+  background-color: #1a1a1a;
+  color: white;
+  padding: 4rem 2rem 1rem 2rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.footer-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 2rem;
+}
+
+.footer-section h4 {
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.footer-links {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.footer-links li {
+  margin-bottom: 0.75rem;
+}
+
+.footer-links a {
+  color: #aaa;
+  text-decoration: none;
+  font-size: 0.9rem;
+  transition: color 0.2s;
+}
+
+.footer-links a:hover {
+  color: #0077cc;
+}
+
+.footer-bottom {
+  border-top: 1px solid #333;
+  margin-top: 3rem;
+}
+
+/* Ensure membership visibility logic applies here too */
+.site-footer .member-menu { display: none; }
+.site-footer .visitor-menu { display: block; }
+
+@media (max-width: 600px) {
+  .footer-container {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+}

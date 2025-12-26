@@ -1,0 +1,41 @@
+{{ define "main" }}
+  <h1 class="center">{{ .Title }}</h1>
+
+  {{/* Only paginate if we are in the "posts" section */}}
+  {{ if eq .Section "posts" }}
+    {{ $pag := .Paginate .Pages 4 }}
+
+    <div class="post-containers-double">
+      {{ range $pag.Pages }}
+        <article class="post-card-double">
+          <h2><a href="{{ .Permalink | absURL }}">{{ .LinkTitle }}</a></h2>
+          {{ if .Summary }}
+            {{ .Summary | safeHTML }}
+          {{ else }}
+            {{ truncate 150 .Plain | safeHTML }}
+          {{ end }}
+					<p class="categories">
+						{{ $categories := .Params.categories }}
+						{{ range $index, $category := $categories -}}
+							<span class="category">{{ $category }}</span>
+						{{- end }}
+					</p>
+        </article>
+      {{ end }}
+    </div>
+
+    {{/* Pagination – only when needed */}}
+    {{ template "_partials/pagination.html" $pag }}
+
+  {{ else }}
+    {{/* Fallback for other sections – just list everything */}}
+    <div class="post-containers-double">
+      {{ range .Pages }}
+        <article class="post-card-double">
+          <h2><a href="{{ .Permalink | absURL}}">{{ .LinkTitle }}</a></h2>
+          {{ .Content }}
+        </article>
+      {{ end }}
+    </div>
+  {{ end }}
+{{ end }}

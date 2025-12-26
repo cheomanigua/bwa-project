@@ -1,0 +1,45 @@
+# Build stage
+FROM golang:1.25-alpine AS builder
+
+# Install build tools
+RUN apk add --no-cache git make gcc musl-dev
+
+# Install xcaddy
+RUN go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+
+# Build Caddy with standard modules
+RUN xcaddy build v2.10.2 \
+    --with github.com/caddyserver/caddy/v2/modules/standard \
+    --output /usr/bin/caddy
+
+# Final stage
+FROM alpine:latest
+
+# Minimal tools + debugging utilities
+RUN apk add --no-cache \
+    ca-certificates \
+    bash \
+    curl \
+    iproute2 \
+    net-tools \
+    procps \
+    tcpdump \
+    vim \
+    bind-tools \
+    less \
+    jq \
+    busybox-extras
+
+# Copy Caddy binary
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+
+# Default config and working dir
+WORKDIR /etc/caddy
+VOLUME ["/etc/caddy", "/srv"]
+
+# Expose the port
+EXPOSE 5000
+
+# Run Caddy
+CMD ["/usr/bin/caddy", "run", "--config", "/etc/caddy/Caddyfile"]
+
